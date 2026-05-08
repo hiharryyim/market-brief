@@ -1,0 +1,13 @@
+# Gmail SMTP 配置模板
+# 使用方式：复制本文件为 email.conf，填入真实凭证
+# 注意 email.conf 已被 .gitignore，不会提交到 git
+
+GMAIL_USER=your_email@gmail.com
+GMAIL_APP_PASS=xxxx xxxx xxxx xxxx
+BRIEF_RECIPIENTS=your_email@gmail.com
+
+# 如何获取 Gmail App Password:
+# 1. 打开 https://myaccount.google.com/apppasswords
+# 2. 登录 Google 账户（需先开启两步验证）
+# 3. App name 填 "MarketDashboard"，点 Create
+# 4. 把生成的 16 位密码填入 GMAIL_APP_PASS

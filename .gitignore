@@ -1,0 +1,19 @@
+# 凭证与隐私（绝对不能提交）
+config/email.conf
+config/recipients.txt
+config/recipients_test.txt
+
+# 运行时数据
+cache/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Claude 临时文件
+.claude/

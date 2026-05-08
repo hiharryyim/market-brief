@@ -1,0 +1,10 @@
+# MarketDashboard 收件人列表模板
+# 使用方式：复制本文件为 recipients.txt，填入真实邮箱
+# 注意 recipients.txt 已被 .gitignore，不会提交到 git
+
+# 每行一个邮箱，# 开头的行为注释
+# 邮箱后可加 # 标注备注名
+
+your_email@gmail.com
+# colleague1@example.com #同事A
+# colleague2@example.com #同事B
