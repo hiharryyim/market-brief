@@ -12,6 +12,7 @@ import sys
 import os
 import time
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from difflib import SequenceMatcher
 
 # 历史新闻 cache 路径（与 send_email.py 共享）
@@ -348,8 +349,11 @@ def main():
     history_ids = load_news_history()
 
     # 并行拉取所有数据
-    et_now = datetime.now()
-    bj_now = et_now + timedelta(hours=12)
+    # 显式按时区计算，避免依赖系统本地时区（用户搬到 LA 后 PT 时区，原代码假设 ET 已失效）
+    now_utc = datetime.now(tz=ZoneInfo("UTC"))
+    pt_now = now_utc.astimezone(ZoneInfo("America/Los_Angeles"))
+    et_now = now_utc.astimezone(ZoneInfo("America/New_York"))
+    bj_now = now_utc.astimezone(ZoneInfo("Asia/Shanghai"))
 
     news_data = fetch_news(news_keywords_grouped, history_ids=history_ids)
 
@@ -361,9 +365,10 @@ def main():
                 used_news_ids.append(it['news_id'])
 
     result = {
+        'timestamp_pt': pt_now.strftime('%Y-%m-%d %H:%M PT'),
         'timestamp_et': et_now.strftime('%Y-%m-%d %H:%M ET'),
         'timestamp_bj': bj_now.strftime('%Y-%m-%d %H:%M 北京时间'),
-        'date': et_now.strftime('%Y-%m-%d'),
+        'date': pt_now.strftime('%Y-%m-%d'),
         '_pipeline_stats': {
             'history_ids_loaded': len(history_ids),
             'news_returned': sum(len(v) for v in news_data.values()),
