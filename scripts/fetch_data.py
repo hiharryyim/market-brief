@@ -76,23 +76,46 @@ def fetch_futu_quotes():
         sz_codes = [c for c in watchlist_codes if c.startswith('SZ.')]
         fx_codes = [c for c in watchlist_codes if c.startswith('FX.')]
 
-        # 逐市场拉取行情快照，每组独立容错
+        # 逐市场拉取行情快照
+        # 重要：Futu snapshot 是"批次原子"的——只要批次里有一个不支持的代码
+        # （比如 OTC 的 ATEYY），整批返回 ret=-1，所有数据都拿不到。
+        # 所以批量失败时要降级为逐个查询，跳过失败的代码。
+        failed_codes = []
         for group_name, codes in [('HK', hk_codes), ('US', us_codes), ('SH', sh_codes), ('SZ', sz_codes)]:
             if not codes:
                 continue
+
+            def _ingest_row(r):
+                prev = r['prev_close_price']
+                last = r['last_price']
+                chg = ((last - prev) / prev * 100) if prev else 0
+                results[r['code']] = {
+                    'name': r['name'], 'last': round(last, 2),
+                    'prev': round(prev, 2), 'chg': round(chg, 2)
+                }
+
             try:
                 ret, data = ctx.get_market_snapshot(codes)
                 if ret == 0:
                     for _, r in data.iterrows():
-                        prev = r['prev_close_price']
-                        last = r['last_price']
-                        chg = ((last - prev) / prev * 100) if prev else 0
-                        results[r['code']] = {
-                            'name': r['name'], 'last': round(last, 2),
-                            'prev': round(prev, 2), 'chg': round(chg, 2)
-                        }
+                        _ingest_row(r)
+                else:
+                    # 批量失败 → 降级为逐个查询，跳过失败的
+                    results[f'_batch_error_{group_name}'] = str(data)
+                    for code in codes:
+                        try:
+                            r2, d2 = ctx.get_market_snapshot([code])
+                            if r2 == 0 and len(d2) > 0:
+                                _ingest_row(d2.iloc[0])
+                            else:
+                                failed_codes.append({'code': code, 'reason': str(d2)})
+                        except Exception as e:
+                            failed_codes.append({'code': code, 'reason': str(e)})
             except Exception as e:
-                results[f'_error_{group_name}'] = str(e)
+                results[f'_exception_{group_name}'] = str(e)
+
+        if failed_codes:
+            results['_failed_codes'] = failed_codes
 
         # FX 类逐个查询（可能不支持批量）
         for code in fx_codes:
