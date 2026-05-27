@@ -4,6 +4,18 @@
 
 ---
 
+## V8.1 · 2026-05-27 — 时区迁移 ET → PT
+
+### 顺手改的
+- 用户从纽约搬到洛杉矶，4 个 routine 的 cron 时间集体往前调 3 小时（保持市场触发时刻不变）
+- brief-asia-preopen: 9PM ET → 6PM PT
+- brief-asia-midday: 11:30PM ET → 8:30PM PT
+- brief-us-preopen: 9AM ET → 6AM PT
+- brief-us-close: 4:30PM ET → 1:30PM PT
+- routine description 同步更新时区标注
+
+---
+
 ## V8 · 2026-05-08 — 新闻 pipeline 大改造
 
 ### 这次主要做了啥
