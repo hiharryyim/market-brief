@@ -68,16 +68,29 @@
 - **`--test` 标志**：使用测试收件人列表
 - **`--news-ids-file`**：发送成功后写入历史 cache 用于去重
 
-## 定时任务（4 个，本地执行）
+## 定时任务（4 个，本地执行，时区 PT）
 
-| Task ID | 时间 (ET) | 内容侧重 |
-|---------|----------|----------|
-| brief-asia-preopen | 9PM 周日-周四 | 美股收盘 → 亚盘前瞻 |
-| brief-asia-midday | 11:30PM 周日-周四 | A股/港股上午盘 → 下午盘关注 |
-| brief-us-preopen | 9AM 周一-周五 | 亚盘收盘 → 美盘前瞻 |
-| brief-us-close | 4:30PM 周一-周五 | 美股全天 → 次日亚盘展望 |
+用户 2026-05-27 从纽约 ET 搬到洛杉矶 PT，4 个 routine cron 已同步调整。
 
-**当前状态：4 个 routine 已升级到 V8，处于灰度测试期（--test 标志），仅发给自己。稳定 1-2 天后手动移除 --test 切到生产模式。**
+| Task ID | 时间 (PT) | 对应市场 | 内容侧重 |
+|---------|----------|----------|----------|
+| brief-asia-preopen | 6PM 周日-周四 | 北京次日 9AM | 美股收盘 → 亚盘前瞻 |
+| brief-asia-midday | 8:30PM 周日-周四 | 北京次日 11:30AM | A股/港股上午盘 → 下午盘关注 |
+| brief-us-preopen | 6AM 周一-周五 | ET 9AM | 亚盘收盘 → 美盘前瞻 |
+| brief-us-close | 1:30PM 周一-周五 | ET 4:30PM | 美股全天 → 次日亚盘展望 |
+
+**当前状态：V8.3 已生产，所有 4 routine 已转生产模式（无 --test，发送给团队 9 人）。会话切换时已暂停（enabled=false），新会话恢复方式：`update_scheduled_task` 把 enabled 设为 true**
+
+## 时间戳实现（V8.2 修复后）
+
+fetch_data.py 用 `zoneinfo` 显式按时区计算，**不依赖系统本地时区**。
+JSON 提供 4 个时间字段：
+- `timestamp_pt` — 洛杉矶时间（用户当前所在）
+- `timestamp_et` — 纽约时间
+- `timestamp_bj` — 北京时间（市场所在）
+- `date` — PT 日期
+
+Routine 模板里时点显示 `[JSON.timestamp_bj] / [JSON.timestamp_pt]`。
 
 ## 关键文件
 
