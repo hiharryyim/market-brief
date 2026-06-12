@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-> 一个自动化的市场情报 agent：自动抓数据、写分析、四班次推送移动端邮件简报。完全在 [Claude Code](https://claude.com/claude-code) 里通过 "vibe coding" 搭建。
+> 一个自动化 agent：编纂并推送每日市场简报——在 [Claude Code](https://claude.com/claude-code) 内构建与运行。
 
 [![Not Investment Advice](https://img.shields.io/badge/⚠️-不构成投资建议-orange)]() [![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-blue)]()
 
@@ -12,66 +12,76 @@
   <em>渲染为移动端优先的邮件——涨红跌绿（中国市场惯例）。</em>
 </p>
 
-> ⚠️ **本仓库是设计案例，不是开箱即用的 app。** 整条 pipeline 依赖本地 Futu OpenD、带行情权限的券商账号、Gmail SMTP，以及 Claude Code 定时任务。这里的价值是**架构、prompt 工程和演进故事**，不是一个能直接跑的二进制。详见 [`docs/`](docs/)。
+> **说明：** 本仓库是设计案例，而非开箱即用的应用。整条 pipeline 依赖本地 Futu OpenD、带行情权限的券商账号、Gmail SMTP，以及 Claude Code 定时任务。这里记录的是**架构、数据契约与设计决策**——详见 [`docs/`](docs/)。
 
-## 这是什么
+## 概览
 
-一个个人工具，每天**四班次**（对齐亚盘/美盘开收）给团队推送移动端优先的市场简报。它作为 agent 跑在 Claude Code 里：
+一个工具，每天**四次**给团队推送简洁的移动端优先市场简报，对齐亚盘与美盘交易时段。它作为 agent 跑在 Claude Code 里，职责清晰地分为三块：
 
-1. Python pipeline（`fetch_data.py`）抓行情、新闻、机构研报、社区情绪，外加一个**全市场"今日热点"扫描**，去重过滤后输出一份结构化 JSON。
-2. AI 读 JSON 写 Markdown 简报——**严禁编造数字**，只描述数据里有的东西。
-3. `send_email.py` 渲染成响应式 HTML 邮件，BCC 群发给团队。
-4. 四个[定时任务](routines/)在开收盘前后自动触发整条流程。
+- **采集** —— Python pipeline 从多个数据源抓取数据，输出一份结构化 JSON。
+- **撰写** —— agent 读取该 JSON，以分析师口吻撰写简报，严格基于数据。
+- **推送** —— 简报渲染为响应式 HTML 邮件并发送给团队。
 
-## 最有意思的部分：全市场热点发现
+四个定时任务在开收盘前后自动触发整条流程。
 
-大多数"自选股"工具只盯你已经关注的票。🔥 **今日热点** 模块能发现**整个美股市场**在异动的板块——哪怕我从没加过自选：
+## 功能
+
+- **定时推送** —— 每天 4 班（亚盘前瞻 / 亚盘午间 / 美盘前瞻 / 美盘收盘），各自针对所属时段。
+- **多阶段新闻 pipeline** —— 多查询召回、历史与跨板块去重、时效窗口、标题相似度过滤、来源加权。
+- **全市场热点扫描** —— 发现整个美股市场在异动的板块，不依赖自选股。
+- **机构研报摘要** —— 近期评级与目标价变动（美股 & 港股）。
+- **社区情绪** —— 引用股民帖子原话，而非泛泛概括。
+- **有据可循的写作** —— agent 绝不编造数字；数据缺失时只描述方向。
+- **移动端优先输出** —— 响应式 HTML 邮件，涨红跌绿。
+
+## 架构
 
 ```
-yfinance 筛选器（涨幅/跌幅/活跃榜）   →  发现异动个股（免费，不依赖券商选股权限）
-        ↓ 喂给 Futu
-Futu get_owner_plate  →  把异动股映射到中文板块名、按频次统计  →  今日热点板块
-        ↓
-重叠去重 + 噪音过滤  →  例如 "🚀 太空/航空航天（7 只 +15~22%）"
+数据源 ──► fetch_data.py ──► market_data.json ──► agent 撰写简报 ──► send_email.py ──► 邮件
+(Futu · yfinance ·  (pipeline:        (结构化            (Markdown，仅             (Markdown →         (Gmail SMTP,
+ Futu 新闻/社区)     去重/过滤)         数据契约)          基于数据)                 响应式 HTML)        BCC 给团队)
+
+           ▲
+   Claude Code 定时任务（每天 4 次）触发流程
 ```
 
-## 怎么运作（输入 → 输出）
+pipeline 的唯一产物是一份 JSON 文档，它是"数据采集"与"撰写"之间的契约。让 agent 远离 API、只读这份数据，正是"绝不编造"得以强制执行的前提。完整数据流、pipeline 阶段与 JSON schema 见 [`docs/architecture.md`](docs/architecture.md)。
 
-| 输入 | 处理 | 输出 |
-|---|---|---|
-| 自选股(Futu)、数据源、配置 | 多阶段新闻 pipeline（召回→去重→时效→相似度→加权）、热点扫描、研报频道、社区情绪 | 一份 `market_data.json` → AI 撰写 Markdown → **响应式 HTML 邮件**，每天 4 封 |
+## 输入与输出
 
-完整数据流与 JSON schema 见 [`docs/architecture.md`](docs/architecture.md)。
+| 输入 | 输出 |
+|---|---|
+| 自选股（Futu）、行情数据源、配置 | `market_data.json` → agent 撰写的 Markdown 简报 → 响应式 HTML 邮件，每天 4 次 |
 
-## 技术与数据源
+## 技术栈与数据源
 
-- **行情：** Futu OpenAPI（港/美），yfinance（指数/商品/汇率/利率）
-- **热点：** yfinance 预设筛选器 + Futu `get_owner_plate`
-- **新闻/研报/社区：** Futu News API（`news_type` 1/3）、受限 WebSearch（Bloomberg/CNBC）
-- **推送：** Gmail SMTP，移动端优先 HTML
-- **编排：** Claude Code 定时任务（cron，本地执行）
-
-## 搭建故事
-
-从一个一次性脚本起步，经过多轮迭代到 **V9**——每一步都由真实的踩坑或限制驱动。最有借鉴价值的几次复盘写在 [`docs/design-notes.md`](docs/design-notes.md)：发现某个 Futu 接口没权限、把整个热点设计推倒重来；一个静默的 OTC 批次 bug 让 AI 编造价格；时区迁移。完整版本史见 [`CHANGELOG.md`](CHANGELOG.md)。
+- **行情** —— Futu OpenAPI（港/美），yfinance（指数、商品、汇率、利率）
+- **热点** —— yfinance 预设筛选器 + Futu `get_owner_plate`
+- **新闻 / 研报 / 社区** —— Futu News API（`news_type` 1/3）、受限 WebSearch（Bloomberg、CNBC）
+- **推送** —— Gmail SMTP，移动端优先 HTML
+- **编排** —— Claude Code 定时任务（cron，本地执行）
 
 ## 项目结构
 
 ```
 .
 ├── README.md / README.zh-CN.md   # 本页（英文 / 中文）
-├── CLAUDE.md                      # agent 遵循的内部项目规格（中文）
-├── CHANGELOG.md                   # V4 → V9 演进
+├── CLAUDE.md                      # agent 遵循的内部项目规格
+├── CHANGELOG.md                   # 版本历史（V4 → V9）
 ├── docs/
-│   ├── architecture.md            # 数据流、pipeline 阶段、JSON schema（输入输出）
-│   └── design-notes.md            # 关键决策 & 踩坑复盘
+│   ├── architecture.md            # 数据流、pipeline 阶段、JSON schema
+│   └── design-notes.md            # 关键设计决策与取舍
 ├── skill/SKILL.md                 # 把简报生成打包成可复用 skill
-├── routines/                      # 4 个定时任务 prompt（agent 设计样本）
+├── routines/                      # 4 个定时任务 prompt
 ├── scripts/
 │   ├── fetch_data.py              # 数据 pipeline → 结构化 JSON
 │   └── send_email.py              # Markdown → 响应式 HTML → Gmail SMTP
 └── config/                        # 仅 *.example 模板（真实凭证已 gitignore）
 ```
+
+## 演进历史
+
+项目经过多轮迭代（V4 → V9），每一步都由实际运行中遇到的具体限制驱动。值得一提的设计决策与取舍写在 [`docs/design-notes.md`](docs/design-notes.md)；完整版本历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 免责声明
 
