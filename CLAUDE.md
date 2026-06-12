@@ -2,18 +2,21 @@
 
 二级市场投资辅助工具集，集成在 Claude Code 中运行，自动化生成并通过 Gmail SMTP 推送 Market Brief。
 
-## 当前版本：V8（多阶段过滤 Pipeline + 受限 WebSearch + 6 板块新闻结构）
+## 当前版本：V9（V8 多阶段新闻 pipeline + 🔥 全市场热点发现 + 6 板块新闻结构）
 
 ## 数据源优先级：Futu → LSEG → yfinance/WebSearch
 
 | 数据 | 优先 | 备选 |
 |------|------|------|
 | 港股+美股行情（含自选股） | **Futu**（需 OpenD） | yfinance |
-| A股指数 | **yfinance**（Futu A股无权限） | LSEG |
+| **美股全市场热点（异动发现）** | **yfinance 筛选器**（day_gainers/losers/most_actives） | — |
+| **热点板块归纳（个股→中文板块）** | **Futu `get_owner_plate`**（需 OpenD） | — |
+| A股**行情**：**项目已决定不需要**，不再查权限（cn_qot_right=N/A）；A股**指数**仅作参考 | **yfinance**（Futu A股无权限） | LSEG |
 | 黄金/白银/原油/汇率 | **yfinance** | LSEG |
 | 美10Y收益率 | **yfinance** ^TNX | — |
 | 金融新闻（国内+部分外媒） | **Futu News API**（无需 OpenD） | WebSearch |
-| **权威外媒新闻** | **WebSearch**（受限：≤2次，≤3条） | — |
+| **机构研报 / 评级** | **Futu News `news_type=3`**（限美股+港股） | — |
+| **权威外媒新闻** | **WebSearch**（受限：≤2次≤3条，仅 BBG+CNBC） | — |
 | 社区情绪 | **Futu 社区 API**（无需 OpenD） | — |
 
 ## V8 新闻 Pipeline（多阶段过滤）
@@ -27,26 +30,48 @@
    - 突发类（国际局势/宏观大宗/市场动态）：48 小时内
    - 趋势类（AI/科技/个股）：7 天内
 5. **板块内主题相似度去重**：标题相似度 ≥ 0.7 视为同主题
-6. **来源加权**：标题含权威机构（美联储/央行/高盛/Bloomberg/Reuters 等）权重 ×1.5
-7. **时间×权重排序**：每板块取 N 条
-8. **输出 used_news_ids**：`send_email.py --news-ids-file` 写入历史 cache
+6. **个股关键词陷阱过滤**：短名是常见词前缀时剔除误命中（如搜"高通"剔除"推高通胀"，`_STOCK_NAME_TRAPS`）
+7. **来源加权**：标题含权威机构（美联储/央行/高盛/Bloomberg/Reuters 等）权重 ×1.5
+8. **时间×权重排序**：每板块取 N 条
+9. **输出 used_news_ids**：`send_email.py --news-ids-file` 写入历史 cache（新闻+研报都参与跨天去重）
+
+**📑 深度研报**（`fetch_research()`，独立于上面 pipeline）：`news_type=3` 多题材召回机构评级/深度点评 → 历史去重 → 近 72h → **剔除 A股（标题含 6 位代码）只留美股+港股** → 相似度去重 → 取 5 条，输出 JSON `research`。
+
+**💬 社区**（`fetch_community()`）：接口每条只有标题（=股民观点原话），无正文/互动数。只取**近 72h**、聚焦美股自选股；brief 里**直接引用原话**，不做空话概括。
+
+## V9 🔥 全市场热点发现（仅美股，仅两个美股 routine）
+
+`scripts/fetch_data.py` 的 `fetch_hotspots()` 输出到 JSON `hotspots` 字段。**完全不依赖 Futu 选股权限**（`get_stock_filter` 收盘失效/疑似无权限，已弃用）：
+
+1. **发现**：yfinance 预设筛选器 `day_gainers` / `day_losers` / `most_actives` 拉全美股异动个股（免费，不碰富途权限）
+2. **归纳**：把异动个股喂给 Futu `get_owner_plate` 批量映射到中文概念/行业板块，按"≥2 只异动股归同一板块"过滤 + 频次排序 → 今日热点板块
+3. **重叠去重**：概念板块与行业板块常覆盖同一波异动（如"太空概念"vs"航空航天与国防"），成员重叠 ≥60% 则合并，别名进 `aka`（最多 2 个）
+4. **噪音板块过滤**：剔除"持仓榜/定投/碎股/热门榜/明星股"等非主题板块（`_PLATE_NOISE_KW`）
+
+输出结构：`hotspots = { hot_sectors:[{name, aka, count, leaders}], top_gainers, top_losers, most_actives, _errors }`
+
+**只进 brief-us-preopen / brief-us-close 两个美股 routine**（数据是美股的）；亚盘两个 routine 不放。港股暂缓（yfinance 港股混入窝轮/牛熊证太脏）。**写时严禁编造**，`hot_sectors` 为空则整节省略。
 
 ## V8 Brief 结构（6 板块 + 子标题分块市场综述）
 
-### 板块结构（严格顺序）
+> 美股 routine 在「一、市场综述」与「重点新闻」之间多一个 **二、🔥 今日热点**（全市场异动，见上）；综述里商品/利率只点结论，详数留「宏观环境」。
+
+### 板块结构（严格顺序，7 板块）
 1. **🌍 国际局势 / 地缘**（Futu News + WebSearch 外媒）
 2. **🏛️ 宏观 / 央行 / 大宗**（Futu News + WebSearch 外媒）
 3. **🤖 AI / 大模型 / 芯片**（Futu News）
 4. **📊 个股聚焦**（Futu News，自选股动态生成）
-5. **📱 A股 / 港股市场**（Futu News）
-6. **💬 社区观察**（Futu Community API）
+5. **📑 深度研报 / 机构观点**（Futu News `news_type=3`，限美股+港股，剔除A股）
+6. **📱 A股 / 港股市场**（Futu News）
+7. **💬 社区观察**（Futu Community API，近72h，引用帖子原话）
 
 ### 受限 WebSearch（外媒补充）
 - 最多调用 2 次
-- 限定 site:bloomberg.com / reuters.com / wsj.com / ft.com / cnbc.com
+- **`allowed_domains` 只用 bloomberg.com + cnbc.com**（Reuters/WSJ/FT 被反爬，放进去整条请求 400）
 - 总共最多挑 3 条加入 brief
 - 仅近 24 小时内
-- 标签：[Bloomberg]/[Reuters]/[WSJ]/[FT]/[CNBC]
+- 标签：[Bloomberg]/[CNBC]
+- 外媒没合适结果就不强凑，用 Futu 新闻兜底
 
 ## 排版规范
 

@@ -375,7 +375,7 @@ def markdown_to_html(md_text: str) -> str:
 {content}
 
 <div class="sig">
-  <div class="sig-name">Harry's MarketDashboard</div>
+  <div class="sig-name">哈利每日 Market Brief</div>
   <div class="sig-tag">Daily market intelligence, powered by AI</div>
   <div class="sig-data">Data: Futu &middot; LSEG &middot; yfinance &middot; Futu News</div>
 </div>

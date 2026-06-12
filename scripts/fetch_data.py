@@ -31,6 +31,12 @@ TIME_WINDOWS = {
 # 主题相似度阈值（标题相似度高于此值视为同主题）
 SIMILARITY_THRESHOLD = 0.7
 
+# 个股新闻关键词陷阱：短名是常见词前缀时，API 会把含该前缀的无关词也命中
+# （如搜"高通"命中"推高通胀"）。命中以下陷阱词的标题直接剔除。可扩展。
+_STOCK_NAME_TRAPS = {
+    '高通': ['高通胀', '通胀', '通货膨胀'],
+}
+
 
 def load_news_history() -> set:
     """加载历史已发送的 news_id 集合（最近 7 天）。"""
@@ -164,13 +170,16 @@ def fetch_yfinance_quotes():
     return results
 
 
-def _fetch_raw_news(keyword: str, size: int = 15) -> list:
-    """单次调用 Futu News API，返回原始结果（不过滤）。"""
+def _fetch_raw_news(keyword: str, size: int = 15, news_type: int = 1) -> list:
+    """单次调用 Futu News API，返回原始结果（不过滤）。
+
+    news_type: 1=新闻 2=公告 3=研报（机构评级/深度点评）。
+    """
     import urllib.request
     import urllib.parse
 
     params = urllib.parse.urlencode({
-        'keyword': keyword, 'size': str(size), 'news_type': '1',
+        'keyword': keyword, 'size': str(size), 'news_type': str(news_type),
         'lang': 'zh-CN', 'sort_type': '2'
     })
     url = f'https://ai-news-search.futunn.com/news_search?{params}'
@@ -215,6 +224,9 @@ def fetch_news(keywords_grouped, history_ids: set = None):
         category_key = '个股' if category.startswith('个股') else category
         time_window_hours = TIME_WINDOWS.get(category_key, 48)
         cutoff_ts = now_ts - time_window_hours * 3600
+        # 个股板块取出股票名对应的陷阱词（如"高通"→剔除含"高通胀"的标题）
+        stock_name = category.split('_', 1)[1] if category.startswith('个股_') else None
+        name_traps = _STOCK_NAME_TRAPS.get(stock_name, []) if stock_name else []
 
         # 1. 多次查询，合并 raw 结果（按 news_id 去重）
         raw_pool = {}
@@ -246,6 +258,10 @@ def fetch_news(keywords_grouped, history_ids: set = None):
                 continue
             title = item.get('title', '').replace('<em>', '').replace('</em>', '')
             if not title:
+                continue
+
+            # 个股关键词误命中过滤（高通胀/通胀等陷阱词）
+            if name_traps and any(tp in title for tp in name_traps):
                 continue
 
             # 板块内主题相似度去重
@@ -285,29 +301,225 @@ def fetch_news(keywords_grouped, history_ids: set = None):
     return all_news
 
 
-def fetch_community(keywords):
-    """通过 Futu 社区 API 搜索帖子"""
+# 板块归纳时要剔除的噪音板块（非主题性：持仓榜/定投/热门榜等）
+_PLATE_NOISE_KW = ['持仓', '定投', '碎股', '可交易', '明星', '热门', '成分', '成份',
+                   '养老', '政府', 'Moomoo', 'FUTU', '券商']
+
+
+def _is_noise_plate(name: str) -> bool:
+    return any(k in name for k in _PLATE_NOISE_KW)
+
+
+def fetch_hotspots():
+    """全市场美股热点（不依赖自选股，也不依赖 Futu 选股权限）。
+
+    两段式：
+    1. 发现：yfinance 预设筛选器（day_gainers / day_losers / most_actives）
+       拉全美股异动个股 —— 免费、不碰富途权限。
+    2. 归纳：Futu get_owner_plate 批量把异动个股映射到中文概念/行业板块，
+       按出现频次排序，得到"今日热点板块"。
+    """
+    result = {'hot_sectors': [], 'top_gainers': [], 'top_losers': [],
+              'most_actives': [], '_errors': []}
+    movers = {}  # symbol -> {sym, name, chg, vol, price}
+
+    # --- 1. yfinance 发现 ---
+    try:
+        import yfinance as yf
+
+        def pull(screen, n):
+            out = []
+            try:
+                r = yf.screen(screen, count=n)
+                quotes = r.get('quotes', []) if isinstance(r, dict) else (r or [])
+                for q in quotes[:n]:
+                    sym = q.get('symbol')
+                    if not sym:
+                        continue
+                    out.append({
+                        'sym': sym,
+                        'name': q.get('shortName') or q.get('longName') or sym,
+                        'chg': round(q.get('regularMarketChangePercent') or 0, 2),
+                        'vol': int(q.get('regularMarketVolume') or 0),
+                        'price': round(q.get('regularMarketPrice') or 0, 2),
+                    })
+            except Exception as e:
+                result['_errors'].append(f'screen {screen}: {e}')
+            return out
+
+        result['top_gainers'] = pull('day_gainers', 8)
+        result['top_losers'] = pull('day_losers', 6)
+        result['most_actives'] = pull('most_actives', 8)
+        for m in result['top_gainers'] + result['top_losers'] + result['most_actives']:
+            movers.setdefault(m['sym'], m)
+    except Exception as e:
+        result['_errors'].append(f'yfinance: {e}')
+        return result
+
+    if not movers:
+        return result
+
+    # --- 2. Futu owner_plate 归纳板块 ---
+    import logging
+    logging.disable(logging.CRITICAL)
+    try:
+        from futu import OpenQuoteContext, RET_OK
+        from collections import defaultdict
+        ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
+        us_codes = [f"US.{s}" for s in movers.keys()]
+
+        # 批量查；批次失败则降级逐个（避免单个未知代码拖垮整批，沿用 V8.3 思路）
+        rows = []
+        ret, pdata = ctx.get_owner_plate(us_codes)
+        if ret == RET_OK:
+            rows = [r for _, r in pdata.iterrows()]
+        else:
+            result['_errors'].append(f'owner_plate batch: {str(pdata)[:80]}')
+            for c in us_codes:
+                try:
+                    r2, d2 = ctx.get_owner_plate([c])
+                    if r2 == RET_OK:
+                        rows.extend([r for _, r in d2.iterrows()])
+                except Exception:
+                    pass
+        ctx.close()
+
+        plate_members = defaultdict(set)
+        for row in rows:
+            if row.get('plate_type') in ('CONCEPT', 'INDUSTRY'):
+                pname = row.get('plate_name', '')
+                if pname and not _is_noise_plate(pname):
+                    sym = str(row.get('code', '')).split('.')[-1]
+                    if sym in movers:
+                        plate_members[pname].add(sym)
+
+        sectors = []
+        for pname, syms in plate_members.items():
+            if len(syms) < 2:  # 至少 2 只异动股归同一板块才算热点
+                continue
+            leaders = sorted(
+                ({'sym': s, 'name': movers[s]['name'], 'chg': movers[s]['chg']} for s in syms),
+                key=lambda x: abs(x['chg']), reverse=True
+            )
+            sectors.append({'name': pname, 'count': len(syms), 'leaders': leaders})
+        sectors.sort(key=lambda x: x['count'], reverse=True)
+
+        # 重叠去重：同一波异动常被概念板块+行业板块各算一遍（如"太空概念"vs"航空航天与国防"）。
+        # 成员重叠 ≥60% 视为同一热点，保留 count 更高的，另一个名字挂到 aka。
+        deduped = []
+        for sec in sectors:
+            sset = {l['sym'] for l in sec['leaders']}
+            merged = False
+            for kept in deduped:
+                kset = {l['sym'] for l in kept['leaders']}
+                inter = len(sset & kset)
+                if inter and inter / min(len(sset), len(kset)) >= 0.6:
+                    aka = kept.setdefault('aka', [])
+                    if len(aka) < 2:  # 别名最多留 2 个，避免 mega-cap 串成长链
+                        aka.append(sec['name'])
+                    merged = True
+                    break
+            if not merged:
+                deduped.append(sec)
+        result['hot_sectors'] = deduped[:5]
+    except Exception as e:
+        result['_errors'].append(f'futu_owner_plate: {e}')
+
+    return result
+
+
+def fetch_community(keywords, recency_hours=72):
+    """通过 Futu 社区 API 搜索帖子。
+
+    社区接口每条只有 title（即帖子标题/首句，就是股民的真实观点），
+    无正文/无互动数/url 为空。所以只保留**近 recency_hours 小时**的帖，多取一些，
+    把帖子原话原样带出，交给 brief 引用（而不是概括成废话）。
+    """
     import urllib.request
     import urllib.parse
 
+    now_ts = int(time.time())
+    cutoff_ts = now_ts - recency_hours * 3600
     all_posts = {}
     for keyword in keywords:
-        params = urllib.parse.urlencode({'keyword': keyword, 'size': '5', 'lang': 'zh-CN'})
+        params = urllib.parse.urlencode({'keyword': keyword, 'size': '12', 'lang': 'zh-CN'})
         url = f'https://ai-news-search.futunn.com/community_search?{params}'
         req = urllib.request.Request(url, headers={'User-Agent': 'futunn-news-search/0.0.2 (Skill)'})
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
-                items = []
-                for item in data.get('data', [])[:4]:
-                    title = item.get('title', '').replace('<em>', '').replace('</em>', '')
-                    ts = item.get('publish_time', '0')
-                    dt = datetime.fromtimestamp(int(ts)).strftime('%m-%d')
-                    items.append({'title': title, 'date': dt})
-                all_posts[keyword] = items
-        except:
+            items = []
+            for item in data.get('data', []):
+                title = item.get('title', '').replace('<em>', '').replace('</em>', '').strip()
+                if not title:
+                    continue
+                try:
+                    ts = int(item.get('publish_time', '0'))
+                except (TypeError, ValueError):
+                    continue
+                if ts < cutoff_ts:  # 只要近 72h 的最新帖
+                    continue
+                dt = datetime.fromtimestamp(ts).strftime('%m-%d')
+                items.append({'title': title, 'date': dt, 'ts': ts})
+            items.sort(key=lambda x: x['ts'], reverse=True)
+            all_posts[keyword] = items[:6]
+        except Exception:
             all_posts[keyword] = []
     return all_posts
+
+
+# 研报选题（板块题材放宽；A股研报会在下面按 6 位代码剔除）
+_RESEARCH_QUERIES = ['英伟达', '美光', '半导体', 'AI 算力', '科技股 评级',
+                     '芯片 评级', '新能源车', '互联网 科技']
+
+
+def fetch_research(history_ids=None, recency_hours=72, limit=5):
+    """机构研报/评级（Futu news_type=3）。仅保留美股+港股，剔除 A股（标题含 6 位代码）。
+
+    多题材召回 → 历史去重 → 近 72h → 剔除 A股 → 主题相似度去重 → 按时间取 N 条。
+    """
+    import re
+    if history_ids is None:
+        history_ids = set()
+    now_ts = int(time.time())
+    cutoff_ts = now_ts - recency_hours * 3600
+    a_share_re = re.compile(r'[（(]\d{6}[)）]')  # A股 6 位代码，如 (603713)/（002025）
+
+    pool = {}
+    for q in _RESEARCH_QUERIES:
+        items = _fetch_raw_news(q, size=10, news_type=3)
+        if items and isinstance(items[0], dict) and '_error' in items[0]:
+            continue
+        for it in items:
+            nid = it.get('news_id', '')
+            if nid and nid not in pool:
+                pool[nid] = it
+
+    seen_titles = []
+    out = []
+    for nid, item in pool.items():
+        if nid in history_ids:
+            continue
+        try:
+            ts = int(item.get('publish_time', '0'))
+        except (TypeError, ValueError):
+            continue
+        if ts < cutoff_ts:
+            continue
+        title = item.get('title', '').replace('<em>', '').replace('</em>', '').strip()
+        if not title:
+            continue
+        if a_share_re.search(title):  # 剔除 A股研报
+            continue
+        if any(is_similar(title, t) for t in seen_titles):
+            continue
+        url = item.get('url', '') or f"https://news.futunn.com/post/{nid.replace('post:', '')}"
+        out.append({'title': title, 'date': datetime.fromtimestamp(ts).strftime('%m-%d'),
+                    'url': url, 'news_id': nid, 'ts': ts})
+        seen_titles.append(title)
+
+    out.sort(key=lambda x: x['ts'], reverse=True)
+    return out[:limit]
 
 
 def get_watchlist_names():
@@ -365,8 +577,9 @@ def main():
     for name in top_stocks:
         news_keywords_grouped.append((f'个股_{name}', [name]))
 
-    # 社区搜索关键词（前4个自选股名 + A股）
-    community_keywords = (top_stocks[:3] if top_stocks else ['腾讯', '英伟达']) + ['A股']
+    # 社区搜索关键词（聚焦自选股，去掉泛 'A股'——它只会带回过期泛帖）
+    # 取前 6 只：有些标的近 72h 无帖，多覆盖几只才能凑够 ~3 只有讨论的
+    community_keywords = top_stocks[:6] if top_stocks else ['英伟达', '美光', '腾讯', '理想汽车']
 
     # 加载历史已发送 news_id（跨天去重）
     history_ids = load_news_history()
@@ -379,13 +592,17 @@ def main():
     bj_now = now_utc.astimezone(ZoneInfo("Asia/Shanghai"))
 
     news_data = fetch_news(news_keywords_grouped, history_ids=history_ids)
+    research_data = fetch_research(history_ids=history_ids)
 
-    # 收集本次拉取的所有 news_id（供 send_email.py 写入历史）
+    # 收集本次拉取的所有 news_id（供 send_email.py 写入历史；研报也参与跨天去重）
     used_news_ids = []
     for items in news_data.values():
         for it in items:
             if 'news_id' in it:
                 used_news_ids.append(it['news_id'])
+    for it in research_data:
+        if 'news_id' in it:
+            used_news_ids.append(it['news_id'])
 
     result = {
         'timestamp_pt': pt_now.strftime('%Y-%m-%d %H:%M PT'),
@@ -395,12 +612,15 @@ def main():
         '_pipeline_stats': {
             'history_ids_loaded': len(history_ids),
             'news_returned': sum(len(v) for v in news_data.values()),
+            'research_returned': len(research_data),
             'used_news_ids_count': len(used_news_ids),
         },
         'used_news_ids': used_news_ids,
         'futu_quotes': fetch_futu_quotes(),
         'yfinance_quotes': fetch_yfinance_quotes(),
+        'hotspots': fetch_hotspots(),
         'news': news_data,
+        'research': research_data,
         'community': fetch_community(community_keywords),
     }
 
