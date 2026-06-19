@@ -17,3 +17,10 @@ __pycache__/
 
 # Claude 临时文件
 .claude/
+
+# mcporter MCP 配置（本地工具，勿公开）
+config/mcporter.json
+
+# 登录 cookie（绝不能公开）
+assets/*cookie*
+assets/*Cookie*

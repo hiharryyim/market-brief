@@ -1,10 +1,10 @@
 # MarketDashboard — 市场信息看板
 
-二级市场投资辅助工具集，集成在 Claude Code 中运行，自动化生成并通过 Gmail SMTP 推送 Market Brief。
+二级市场投资辅助工具集，集成在 Claude/Codex 桌面环境中运行，自动化生成并通过 Gmail SMTP 推送 Market Brief。
 
-## 当前版本：V9（V8 多阶段新闻 pipeline + 🔥 全市场热点发现 + 6 板块新闻结构）
+## 当前版本：V10（订阅外媒 Chrome 增强 + Futu 兜底 + 四板块媒体覆盖）
 
-## 数据源优先级：Futu → LSEG → yfinance/WebSearch
+## 数据源优先级：Futu → yfinance/LSEG；订阅外媒走 Chrome 原站
 
 | 数据 | 优先 | 备选 |
 |------|------|------|
@@ -14,9 +14,10 @@
 | A股**行情**：**项目已决定不需要**，不再查权限（cn_qot_right=N/A）；A股**指数**仅作参考 | **yfinance**（Futu A股无权限） | LSEG |
 | 黄金/白银/原油/汇率 | **yfinance** | LSEG |
 | 美10Y收益率 | **yfinance** ^TNX | — |
-| 金融新闻（国内+部分外媒） | **Futu News API**（无需 OpenD） | WebSearch |
+| 金融新闻（基础召回+兜底） | **Futu News API**（无需 OpenD） | — |
 | **机构研报 / 评级** | **Futu News `news_type=3`**（限美股+港股） | — |
-| **权威外媒新闻** | **WebSearch**（受限：≤2次≤3条，仅 BBG+CNBC） | — |
+| **订阅外媒正文** | **已登录 Chrome：Bloomberg / FT / WSJ** | Futu News |
+| **外媒候选发现** | 三家媒体首页 / Agent Reach Exa | Futu News |
 | 社区情绪 | **Futu 社区 API**（无需 OpenD） | — |
 
 ## V8 新闻 Pipeline（多阶段过滤）
@@ -52,26 +53,28 @@
 
 **只进 brief-us-preopen / brief-us-close 两个美股 routine**（数据是美股的）；亚盘两个 routine 不放。港股暂缓（yfinance 港股混入窝轮/牛熊证太脏）。**写时严禁编造**，`hot_sectors` 为空则整节省略。
 
-## V8 Brief 结构（6 板块 + 子标题分块市场综述）
+## V10 Brief 结构（7 板块 + 四板块外媒增强）
 
 > 美股 routine 在「一、市场综述」与「重点新闻」之间多一个 **二、🔥 今日热点**（全市场异动，见上）；综述里商品/利率只点结论，详数留「宏观环境」。
 
 ### 板块结构（严格顺序，7 板块）
-1. **🌍 国际局势 / 地缘**（Futu News + WebSearch 外媒）
-2. **🏛️ 宏观 / 央行 / 大宗**（Futu News + WebSearch 外媒）
-3. **🤖 AI / 大模型 / 芯片**（Futu News）
-4. **📊 个股聚焦**（Futu News，自选股动态生成）
+1. **🌍 国际局势 / 地缘**（1 条外媒 + 至少 1 条 Futu）
+2. **🏛️ 宏观 / 央行 / 大宗**（1-2 条外媒 + 至少 1 条 Futu）
+3. **🤖 AI / 大模型 / 芯片**（1-2 条外媒 + 至少 1 条 Futu）
+4. **📊 个股 / 行业聚焦**（1-2 条外媒 + 至少 1 条 Futu）
 5. **📑 深度研报 / 机构观点**（Futu News `news_type=3`，限美股+港股，剔除A股）
 6. **📱 A股 / 港股市场**（Futu News）
 7. **💬 社区观察**（Futu Community API，近72h，引用帖子原话）
 
-### 受限 WebSearch（外媒补充）
-- 最多调用 2 次
-- **`allowed_domains` 只用 bloomberg.com + cnbc.com**（Reuters/WSJ/FT 被反爬，放进去整条请求 400）
-- 总共最多挑 3 条加入 brief
-- 仅近 24 小时内
-- 标签：[Bloomberg]/[CNBC]
-- 外媒没合适结果就不强凑，用 Futu 新闻兜底
+### V10 订阅外媒（Bloomberg / FT / WSJ）
+- **正文路径**：通过本地已登录 Chrome 原站读取；不导出 cookie，不把订阅凭证发给 Exa/Jina。
+- **运行条件**：Chrome 已启动、扩展已连接、三家账号已登录。任一失败时对应板块直接由 Futu 补齐，整封 brief 继续发送。
+- **反自动化边界**：Bloomberg 出现 `Are you a robot?` 时不绕过；无人值守任务直接跳过该来源。
+- **配额**：正常 5-7 条外媒，至少覆盖 2 家；有合适内容时尽量覆盖三家，但不强凑。
+- **时效**：国际/宏观优先 48h；AI/个股趋势类最多 7 天。
+- **去重**：同一事件跨媒体、跨板块只保留一条，可把外媒与 Futu 合并为双来源；外媒 URL 写入 `cache/sent_external_news_history.json` 做 7 天跨 routine 去重。
+- **个股优先级**：自选股/显著异动 > 业绩与指引 > 并购/资本开支 > 行业结构变化。
+- **宏观环境**：新增「媒体视角」，随后用行情 JSON 对媒体判断做交叉验证，再写「核心观察」。
 
 ## 排版规范
 
@@ -87,11 +90,12 @@
 - **脚本**：`scripts/send_email.py`
 - **配置**：`config/email.conf`（Gmail SMTP App Password）
 - **收件人**：
-  - 生产：`config/recipients.txt`（团队 8 人）
+  - 生产：`config/recipients.txt`（团队 13 人）
   - **测试**：`config/recipients_test.txt`（仅你自己 2 邮箱）
 - **BCC 密送**：所有收件人通过 SMTP envelope 发送，header 中只显示发件人
 - **`--test` 标志**：使用测试收件人列表
-- **`--news-ids-file`**：发送成功后写入历史 cache 用于去重
+- **`--news-ids-file`**：发送成功后写入 Futu `news_id` 历史 cache
+- **`--external-urls-file`**：发送成功后写入规范化外媒 URL 历史 cache
 
 ## 定时任务（4 个，本地执行，时区 PT）
 
@@ -104,7 +108,7 @@
 | brief-us-preopen | 6AM 周一-周五 | ET 9AM | 亚盘收盘 → 美盘前瞻 |
 | brief-us-close | 1:30PM 周一-周五 | ET 4:30PM | 美股全天 → 次日亚盘展望 |
 
-**当前状态：V8.3 已生产，所有 4 routine 已转生产模式（无 --test，发送给团队 9 人）。会话切换时已暂停（enabled=false），新会话恢复方式：`update_scheduled_task` 把 enabled 设为 true**
+**当前状态：V10 已生产。仓库 `routines/` 与 `~/.claude/scheduled-tasks/brief-*/SKILL.md` 四份运行时 prompt 已同步；原有 4 个本地 schedule 为 ACTIVE。生产任务无 `--test`，发送给团队 13 人。**
 
 ## 时间戳实现（V8.2 修复后）
 
@@ -124,13 +128,14 @@ Routine 模板里时点显示 `[JSON.timestamp_bj] / [JSON.timestamp_pt]`。
 ├── CLAUDE.md                      # 本文档
 ├── config/
 │   ├── email.conf                 # Gmail SMTP 配置（chmod 600）
-│   ├── recipients.txt             # 生产收件人（团队 8 人）
+│   ├── recipients.txt             # 生产收件人（团队 13 人）
 │   └── recipients_test.txt        # 测试收件人（仅自己 2 邮箱）
 ├── scripts/
 │   ├── fetch_data.py              # 数据拉取 + 多阶段过滤 pipeline
 │   └── send_email.py              # Markdown→HTML，BCC 密送，历史 cache 写入
 └── cache/
-    └── sent_news_history.json     # 最近 7 天已发送 news_id（去重用）
+    ├── sent_news_history.json     # 最近 7 天已发送 Futu news_id
+    └── sent_external_news_history.json # 最近 7 天已发送外媒 URL
 ```
 
 ## Futu 权限
@@ -139,17 +144,18 @@ Routine 模板里时点显示 `[JSON.timestamp_bj] / [JSON.timestamp_pt]`。
 - News/Community API：无需 OpenD，纯 HTTP 调用
 - OpenD: `/Applications/Futu_OpenD.app` → `127.0.0.1:11111`
 
-## 灰度发布流程
+## V10 运行与回滚
 
-1. **当前**：4 个 routine 都带 `--test`，仅发给自己
-2. **观察 1-2 天**：稳定性、内容质量、去重效果
-3. **稳定后**：手动编辑 4 个 routine 的 prompt，移除 `--test` 标志
-4. **回滚预案**：如果 V8 不稳定，可参考 git/历史 prompt 回退
+1. 生产发送必须同时传 `--news-ids-file` 与 `--external-urls-file`；测试发送不传，避免污染历史。
+2. Chrome 不可用不是发送阻断条件，必须退回 Futu-only brief。
+3. 如果订阅外媒质量或稳定性异常，可把 routine 的步骤 3 回退为 Futu-only，行情与邮件链路不受影响。
+4. 仓库通过 git 记录 V10；回滚使用 `git revert`，不要删除历史 cache 以制造重复新闻。
 
 ## 已知问题与未来 Phase 2
 
 - 个股新闻搜索的关键词命中可能不精准（搜"高通"会捞到"高通胀"）
 - 报告类旧新闻（华尔街喊话）可能仍偶尔混入，可考虑增加"是否突发"分类器
-- WSJ Chrome MCP 集成（利用已登录 session）— Phase 2
+- Chrome 必须保持运行且扩展连接，才能在自动任务中使用订阅外媒；否则会按设计降级为 Futu-only
+- Bloomberg 仍可能偶发人工验证；无人值守时不会尝试绕过
 - Embedding 聚类替代 SequenceMatcher — Phase 2
 - 多语言英文版 brief — Phase 2

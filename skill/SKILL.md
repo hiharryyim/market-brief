@@ -7,7 +7,7 @@ description: >-
   numbers), and sends it as a mobile-first HTML email. Use for scheduled
   pre-open / midday / close market briefings.
 metadata:
-  version: "9"
+  version: "10"
   author: Harry
 ---
 
@@ -30,11 +30,14 @@ broker API, market, or delivery channel.
 | News / 新闻 | Futu News API `news_type=1` | Multi-query recall per section |
 | Research / 研报 | Futu News API `news_type=3` | Analyst ratings; US+HK only |
 | Community / 社区 | Futu Community API | Recent posts; titles = retail voices |
-| Foreign media / 外媒 | WebSearch (Bloomberg, CNBC) | Restricted: ≤2 calls, ≤3 items, ≤24h |
+| Foreign media / 外媒 | Logged-in Chrome (Bloomberg, FT, WSJ) | Original article text; Futu fallback |
+| Candidate discovery / 候选发现 | Publisher homepages / Agent Reach Exa | Discovery only; no subscriber cookies |
 | Config / 配置 | `config/email.conf`, `config/recipients.txt` | Gmail SMTP + recipients (gitignored) |
 
 **Requires / 依赖:** Futu OpenD running on `127.0.0.1:11111` with HK/US quote
-permission; `futu-api` + `yfinance`; a Gmail App Password.
+permission; `futu-api` + `yfinance`; a Gmail App Password. Subscription-media
+enrichment additionally requires Chrome running with the browser extension connected
+and Bloomberg / FT / WSJ logged in; otherwise the brief degrades to Futu-only.
 
 ## Processing / 处理
 
@@ -43,11 +46,16 @@ permission; `futu-api` + `yfinance`; a Gmail App Password.
 multi-stage news filtering (recall → dedupe → recency → similarity → weighting),
 a market-wide hotspot scan, an analyst-research channel, and community sentiment.
 
+During writing, V10 adds verified subscription journalism to international, macro,
+AI, and stock/industry sections while retaining at least one Futu item in each.
+The normal target is 5-7 external items; same-event stories are merged. External
+URLs are canonicalized and stored for seven-day cross-routine dedupe.
+
 ## Output / 输出
 
 1. **`market_data.json`** — the structured contract (schema in `docs/architecture.md`).
 2. **The brief** — Claude reads the JSON and writes Markdown into a fixed
-   skeleton (Overview → 🔥 Hotspots → Key News (7 sections) → Macro). **Hard rule:
+   skeleton (Overview → 🔥 Hotspots → Key News (7 sections) → Macro with Media View). **Hard rule:
    never invent a number; if a field is absent, describe direction only.**
 3. **The email** — `scripts/send_email.py` renders Markdown → mobile-first HTML
    (red=up / green=down) and BCC-sends via Gmail SMTP.
@@ -58,14 +66,16 @@ a market-wide hotspot scan, an analyst-research channel, and community sentiment
 # 1. pull data
 python3 scripts/fetch_data.py > /tmp/market_data.json
 
-# 2. (agent step) read the JSON, optionally add ≤3 foreign-media items via
-#    WebSearch, write /tmp/market_brief.md following the routine prompt.
+# 2. (agent step) read the JSON; discover candidates; read Bloomberg / FT / WSJ
+#    originals through logged-in Chrome; fall back to Futu on any browser/source
+#    failure; write /tmp/market_brief.md and /tmp/used_external_urls.json.
 
 # 3. send (use --test for yourself; --news-ids-file feeds 7-day dedupe)
 python3 scripts/send_email.py \
   --subject "哈利每日 Market Brief · 美盘收盘 · $(date +%Y-%m-%d)" \
   --markdown-file /tmp/market_brief.md \
-  --news-ids-file /tmp/used_news_ids.json
+  --news-ids-file /tmp/used_news_ids.json \
+  --external-urls-file /tmp/used_external_urls.json
 ```
 
 To run it automatically, wire steps 1–3 into a scheduled task. The four reference
@@ -81,4 +91,8 @@ prompts are in [`../routines/`](../routines/) — they differ only in session fo
 - **Design for partial failure.** Batch-atomic APIs degrade to per-item. /
   为部分失败设计降级。
 - **Dedupe across the day.** A rolling 7-day `news_id` cache stops the same story
-  appearing in all four briefs. / 跨天滚动去重。
+  appearing in all four briefs; V10 applies the same rule to canonical external
+  article URLs. / Futu news_id 与外媒 URL 都做 7 天滚动去重。
+- **Browser access is an enhancement, not a dependency.** Subscription originals
+  improve context, but Chrome or publisher failure always falls back to Futu. /
+  浏览器外媒是增强路径，不是发送单点依赖。

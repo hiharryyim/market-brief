@@ -22,12 +22,16 @@ import json
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
+from urllib.parse import urlsplit, urlunsplit
 
 
 CONFIG_PATH = os.path.expanduser("~/Desktop/MarketDashboard/config/email.conf")
 RECIPIENTS_PATH = os.path.expanduser("~/Desktop/MarketDashboard/config/recipients.txt")
 RECIPIENTS_TEST_PATH = os.path.expanduser("~/Desktop/MarketDashboard/config/recipients_test.txt")
 NEWS_HISTORY_PATH = os.path.expanduser("~/Desktop/MarketDashboard/cache/sent_news_history.json")
+EXTERNAL_NEWS_HISTORY_PATH = os.path.expanduser(
+    "~/Desktop/MarketDashboard/cache/sent_external_news_history.json"
+)
 
 
 def load_config() -> dict:
@@ -59,32 +63,58 @@ def load_recipients(test_mode: bool = False) -> list[str]:
     return recipients
 
 
-def append_news_history(news_ids: list, max_days: int = 7):
-    """将本次使用的 news_id 写入历史 cache，供 fetch_data.py 去重。"""
-    if not news_ids:
+def append_history_entries(path: str, entries: list[str], max_days: int = 7):
+    """Append entries to a dated rolling history file."""
+    if not entries:
         return
     from datetime import datetime, timedelta
     today = datetime.now().strftime('%Y-%m-%d')
 
     history = {}
-    if os.path.exists(NEWS_HISTORY_PATH):
+    if os.path.exists(path):
         try:
-            with open(NEWS_HISTORY_PATH) as f:
+            with open(path) as f:
                 history = json.load(f)
         except:
             history = {}
 
     existing = set(history.get(today, []))
-    existing.update(news_ids)
-    history[today] = list(existing)
+    existing.update(entries)
+    history[today] = sorted(existing)
 
     # 只保留最近 max_days 天
     cutoff = (datetime.now() - timedelta(days=max_days)).strftime('%Y-%m-%d')
     history = {k: v for k, v in history.items() if k >= cutoff}
 
-    os.makedirs(os.path.dirname(NEWS_HISTORY_PATH), exist_ok=True)
-    with open(NEWS_HISTORY_PATH, 'w') as f:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+def append_news_history(news_ids: list[str], max_days: int = 7):
+    """Persist Futu news IDs for fetch_data.py deduplication."""
+    append_history_entries(NEWS_HISTORY_PATH, news_ids, max_days=max_days)
+
+
+def canonicalize_external_url(url: str) -> str:
+    """Remove tracking query strings and fragments before external-news dedupe."""
+    if not isinstance(url, str):
+        return ""
+    parts = urlsplit(url.strip())
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return ""
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, "", ""))
+
+
+def append_external_news_history(urls: list[str], max_days: int = 7):
+    """Persist canonical subscriber-media URLs for cross-routine deduplication."""
+    canonical_urls = sorted({canonicalize_external_url(url) for url in urls})
+    canonical_urls = [url for url in canonical_urls if url]
+    append_history_entries(
+        EXTERNAL_NEWS_HISTORY_PATH,
+        canonical_urls,
+        max_days=max_days,
+    )
 
 
 def send_email(subject: str, html_body: str, recipients: list[str] = None, test_mode: bool = False):
@@ -397,6 +427,10 @@ if __name__ == "__main__":
     parser.add_argument("--to", help="Comma-separated recipient emails (overrides BRIEF_RECIPIENTS)")
     parser.add_argument("--test", action="store_true", help="使用 recipients_test.txt（仅自己的邮箱）")
     parser.add_argument("--news-ids-file", help="JSON 文件路径，包含本次使用的 news_id 列表（用于历史去重）")
+    parser.add_argument(
+        "--external-urls-file",
+        help="JSON 文件路径，包含本次使用的外媒文章 URL（用于跨 routine 历史去重）",
+    )
 
     args = parser.parse_args()
 
@@ -434,3 +468,14 @@ if __name__ == "__main__":
                 print(f"OK: {len(ids)} news_ids appended to history cache")
         except Exception as e:
             print(f"WARN: Failed to update news history: {e}")
+
+    # 发送成功后记录订阅外媒 URL；查询参数会被去掉，避免同文不同 tracking 参数漏去重。
+    if args.external_urls_file and os.path.exists(args.external_urls_file):
+        try:
+            with open(args.external_urls_file) as f:
+                urls = json.load(f)
+            if isinstance(urls, list) and urls:
+                append_external_news_history(urls)
+                print(f"OK: {len(urls)} external URLs appended to history cache")
+        except Exception as e:
+            print(f"WARN: Failed to update external news history: {e}")

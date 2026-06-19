@@ -35,11 +35,15 @@ The per-stock news search matched the company name as a substring. Searching **�
 
 > 教训：中文短名做关键词检索天然有歧义，且接口不给结构化关联字段时，只能在标题层面做针对性陷阱过滤。
 
-## 5. Half the "authoritative sources" were unreachable / 一半权威外媒根本爬不到
+## 5. Search could find paywalled journalism but could not read it / 搜索能找到付费新闻，却读不到正文
 
-The brief was supposed to enrich with Bloomberg / Reuters / WSJ / FT / CNBC. In practice, putting Reuters/WSJ/FT in `allowed_domains` made the **entire WebSearch request 400** (they block the crawler). Only Bloomberg + CNBC actually return. Fix: restrict to those two, and **fall back to Futu news** when foreign sources have nothing — don't force a weak fit.
+**V9 failure:** the brief tried to enrich with Bloomberg / Reuters / WSJ / FT / CNBC through WebSearch. Reuters/WSJ/FT could make the entire restricted-domain request fail; even when Exa found the right FT or WSJ title, it could not use the subscriber session and returned a paywall. Bloomberg also rejected automated retrieval.
 
-> 教训：先验证数据源真的可达，再写进 pipeline；够用的两家好过列一长串不可达的。
+**V10 pivot:** candidate discovery and article reading became separate stages. Agent Reach/Exa or publisher homepages may discover candidates, but the original Bloomberg / FT / WSJ text is read only through the user's logged-in local Chrome session. No subscription cookies are exported. If Chrome is closed, the extension is disconnected, a login has expired, or Bloomberg shows a robot check, the routine skips that source and keeps sending with Futu news.
+
+The final content policy also changed: international, macro, AI, and stock/industry sections each retain Futu while adding relevant subscription journalism. Same-event stories are merged, and canonical external URLs enter a seven-day history cache so four daily routines do not repeat them.
+
+> 教训：搜索、授权和正文读取是三件不同的事。付费内容要在用户本地登录态中读取，同时把浏览器路径设计成可降级增强，而不是新的单点故障。
 
 ## 6. Community gave only titles — so quote them / 社区只有标题——那就直接引用
 

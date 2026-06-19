@@ -4,6 +4,15 @@
 
 ---
 
+## V10 · 2026-06-19 — 订阅外媒增强正式上线
+- 通过本地已登录 Chrome 读取 Bloomberg、Financial Times、Wall Street Journal 原站正文；Agent Reach/Exa 只做候选发现
+- 国际、宏观、AI、个股/行业四个板块均采用「外媒增强 + Futu 兜底」，Chrome 或单一媒体失败不阻断整封 brief
+- 个股/行业聚焦新增外媒：优先覆盖自选股、显著异动、业绩指引、并购资本开支和行业结构变化
+- 宏观环境新增「媒体视角」，再用利率、美元、商品和权益数据交叉验证形成「核心观察」
+- 跨来源/跨板块同事件合并，支持外媒与 Futu 双来源行
+- 新增 `sent_external_news_history.json` 与 `--external-urls-file`，按规范化 URL 做 7 天跨 routine 去重
+- 四份仓库 routine 与四份运行时 scheduled-task prompt 同步；原有四个 production schedule 正式启用
+
 ## V9 · 2026-06-12 — 全市场热点 + 深度研报
 - 🔥 新增「今日热点」：yfinance 筛选器发现全市场异动 + Futu `get_owner_plate` 归纳板块（不依赖选股权限）
 - 📑 新增「深度研报」栏：Futu `news_type=3` 机构评级（限美股 + 港股）
