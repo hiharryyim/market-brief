@@ -2,6 +2,7 @@
 config/email.conf
 config/recipients.txt
 config/recipients_test.txt
+config/news4alpha.conf
 
 # 运行时数据
 cache/
@@ -24,3 +25,4 @@ config/mcporter.json
 # 登录 cookie（绝不能公开）
 assets/*cookie*
 assets/*Cookie*
+assets/.DS_Store

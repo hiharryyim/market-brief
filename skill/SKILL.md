@@ -7,7 +7,7 @@ description: >-
   numbers), and sends it as a mobile-first HTML email. Use for scheduled
   pre-open / midday / close market briefings.
 metadata:
-  version: "10"
+  version: "10.1"
   author: Harry
 ---
 
@@ -28,28 +28,31 @@ broker API, market, or delivery channel.
 | Watchlist / 自选股 | Futu `get_user_security` | Drives per-stock news + quotes; no manual list |
 | Market data / 行情 | Futu OpenD + yfinance | HK/US via Futu; indices·commodities·FX·rates via yfinance |
 | News / 新闻 | Futu News API `news_type=1` | Multi-query recall per section |
-| Research / 研报 | Futu News API `news_type=3` | Analyst ratings; US+HK only |
-| Community / 社区 | Futu Community API | Recent posts; titles = retail voices |
-| Foreign media / 外媒 | Logged-in Chrome (Bloomberg, FT, WSJ) | Original article text; Futu fallback |
+| Research / 研报 | Futu News API `news_type=3` | Analyst ratings; watchlist + Mag7/AI/semis + US hotspots; US+HK only |
+| Community / 社区 | Futu Community API | Wider keyword pool; recent posts; titles = retail voices |
+| Foreign media / 外媒 | Publisher RSS + logged-in Chrome (Bloomberg, FT, WSJ) | RSS baseline; selected original article text; RSS/Futu fallback |
 | Candidate discovery / 候选发现 | Publisher homepages / Agent Reach Exa | Discovery only; no subscriber cookies |
 | Config / 配置 | `config/email.conf`, `config/recipients.txt` | Gmail SMTP + recipients (gitignored) |
 
 **Requires / 依赖:** Futu OpenD running on `127.0.0.1:11111` with HK/US quote
-permission; `futu-api` + `yfinance`; a Gmail App Password. Subscription-media
-enrichment additionally requires Chrome running with the browser extension connected
-and Bloomberg / FT / WSJ logged in; otherwise the brief degrades to Futu-only.
+permission; `futu-api` + `yfinance`; a Gmail App Password. Publisher RSS works
+without browser credentials. Subscription-media deep reads additionally require
+Chrome running with the browser extension connected and Bloomberg / FT / WSJ logged
+in; otherwise the brief degrades to RSS/Futu fallback.
 
 ## Processing / 处理
 
 `scripts/fetch_data.py` runs the full pipeline (see
 [`../docs/architecture.md`](../docs/architecture.md)) and emits **one JSON**:
 multi-stage news filtering (recall → dedupe → recency → similarity → weighting),
-a market-wide hotspot scan, an analyst-research channel, and community sentiment.
+a market-wide hotspot scan, an expanded analyst-research channel, and wider
+community sentiment.
 
-During writing, V10 adds verified subscription journalism to international, macro,
-AI, and stock/industry sections while retaining at least one Futu item in each.
-The normal target is 5-7 external items; same-event stories are merged. External
-URLs are canonicalized and stored for seven-day cross-routine dedupe.
+During writing, V10.1 first uses public publisher RSS summaries, then upgrades only
+selected high-value stories to verified subscription journalism in international,
+macro, AI, and stock/industry sections while retaining at least one Futu item in
+each. The normal target is 5-7 external items; same-event stories are merged.
+External URLs are canonicalized and stored for seven-day cross-routine dedupe.
 
 ## Output / 输出
 
@@ -66,8 +69,9 @@ URLs are canonicalized and stored for seven-day cross-routine dedupe.
 # 1. pull data
 python3 scripts/fetch_data.py > /tmp/market_data.json
 
-# 2. (agent step) read the JSON; discover candidates; read Bloomberg / FT / WSJ
-#    originals through logged-in Chrome; fall back to Futu on any browser/source
+# 2. (agent step) read the JSON; use RSS summaries for baseline facts; read
+#    selected Bloomberg / FT / WSJ originals through logged-in Chrome only when
+#    deeper context is needed; fall back to RSS/Futu on any browser/source
 #    failure; write /tmp/market_brief.md and /tmp/used_external_urls.json.
 
 # 3. send (use --test for yourself; --news-ids-file feeds 7-day dedupe)
@@ -94,5 +98,8 @@ prompts are in [`../routines/`](../routines/) — they differ only in session fo
   appearing in all four briefs; V10 applies the same rule to canonical external
   article URLs. / Futu news_id 与外媒 URL 都做 7 天滚动去重。
 - **Browser access is an enhancement, not a dependency.** Subscription originals
-  improve context, but Chrome or publisher failure always falls back to Futu. /
+  improve context, but Chrome or publisher failure always falls back to RSS/Futu. /
   浏览器外媒是增强路径，不是发送单点依赖。
+- **The brief is not an execution log.** Pre-send checks prevent raw field names,
+  browser-verification failures, and sample-count explanations from leaking into
+  reader-facing email. / Brief 不是执行日志，发送前检查会拦截内部过程话术。

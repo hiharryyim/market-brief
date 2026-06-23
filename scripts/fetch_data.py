@@ -11,12 +11,30 @@ import json
 import sys
 import os
 import time
+import html
+import re
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from difflib import SequenceMatcher
 
 # 历史新闻 cache 路径（与 send_email.py 共享）
 NEWS_HISTORY_PATH = os.path.expanduser("~/Desktop/MarketDashboard/cache/sent_news_history.json")
+EXTERNAL_NEWS_HISTORY_PATH = os.path.expanduser(
+    "~/Desktop/MarketDashboard/cache/sent_external_news_history.json"
+)
+
+# Public publisher feeds provide titles and short excerpts without touching
+# subscriber sessions. Chrome is reserved for selected articles that need
+# full-text context during the writing stage.
+EXTERNAL_RSS_FEEDS = {
+    'Bloomberg': 'https://feeds.bloomberg.com/markets/news.rss',
+    'WSJ': 'https://feeds.a.dj.com/rss/RSSMarketsMain.xml',
+    'FT': 'https://www.ft.com/companies?format=rss',
+}
 
 # 时效性窗口（小时）— 不同类别使用不同窗口
 TIME_WINDOWS = {
@@ -37,20 +55,188 @@ _STOCK_NAME_TRAPS = {
     '高通': ['高通胀', '通胀', '通货膨胀'],
 }
 
+COMMUNITY_FALLBACK_KEYWORDS = [
+    '美光科技', '英伟达', 'AMD', '特斯拉', '苹果', '微软',
+    '谷歌', '亚马逊', 'Meta', '英特尔', '台积电',
+]
 
-def load_news_history() -> set:
-    """加载历史已发送的 news_id 集合（最近 7 天）。"""
+RESEARCH_THEME_QUERIES = [
+    '半导体 评级', 'AI 算力 评级', '科技股 评级', '芯片 目标价',
+    '美股 目标价', '新能源车 评级', '互联网 科技', 'Mag7 评级',
+]
+
+RESEARCH_FALLBACK_KEYWORDS = [
+    '英伟达', '微软', '苹果', '亚马逊', '谷歌', 'Meta', '特斯拉',
+    '美光', 'AMD', '英特尔', '博通', '台积电', '高通', 'Arm',
+]
+
+_COMMUNITY_SIGNAL_WORDS = [
+    '涨', '跌', '买', '卖', '做多', '做空', '看多', '看空',
+    '换股', '财报', '业绩', '指引', '订单', 'AI', '估值',
+    '突破', '回调', '加仓', '减仓',
+]
+
+
+def load_news_history(max_days: int = None) -> set:
+    """加载历史已发送的 news_id 集合。
+
+    max_days=None 时返回 cache 内全部（默认 7 天滚动窗口，由 send_email.py 维护）。
+    max_days=N 时只返回最近 N 天发送过的 id —— 研报板块用更短的窗口去重，
+    避免被新闻共享的 7 天历史拖累到长期为空（研报召回池本来就浅）。
+    """
     if not os.path.exists(NEWS_HISTORY_PATH):
         return set()
     try:
         with open(NEWS_HISTORY_PATH) as f:
             history = json.load(f)
+        cutoff = None
+        if max_days is not None:
+            from datetime import datetime, timedelta
+            cutoff = (datetime.now() - timedelta(days=max_days)).strftime('%Y-%m-%d')
         all_ids = set()
         for date, ids in history.items():
+            if cutoff is not None and date < cutoff:
+                continue
             all_ids.update(ids)
         return all_ids
     except:
         return set()
+
+
+def canonicalize_external_url(url: str) -> str:
+    """Normalize an external URL for cross-routine history comparison."""
+    if not isinstance(url, str):
+        return ''
+    parts = urllib.parse.urlsplit(url.strip())
+    if parts.scheme not in {'http', 'https'} or not parts.netloc:
+        return ''
+    return urllib.parse.urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path, '', '')
+    )
+
+
+def load_external_news_history(max_days: int = 7) -> set:
+    """Load recently used canonical publisher URLs."""
+    if not os.path.exists(EXTERNAL_NEWS_HISTORY_PATH):
+        return set()
+    try:
+        with open(EXTERNAL_NEWS_HISTORY_PATH) as f:
+            history = json.load(f)
+        cutoff = (datetime.now() - timedelta(days=max_days)).strftime('%Y-%m-%d')
+        urls = set()
+        for date, entries in history.items():
+            if date < cutoff:
+                continue
+            for url in entries:
+                canonical = canonicalize_external_url(url)
+                if canonical:
+                    urls.add(canonical)
+        return urls
+    except Exception:
+        return set()
+
+
+def _strip_rss_html(value: str) -> str:
+    """Turn a short RSS description into bounded plain text."""
+    text = re.sub(r'<[^>]+>', ' ', value or '')
+    return re.sub(r'\s+', ' ', html.unescape(text)).strip()
+
+
+def _parse_rss_timestamp(value: str) -> int:
+    """Parse RFC 2822 or ISO-8601 feed timestamps."""
+    if not value:
+        return 0
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        try:
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except (TypeError, ValueError):
+            return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
+
+
+def _parse_external_rss(xml_data: bytes, source: str, history_urls=None,
+                        recency_hours: int = 168, limit: int = 15,
+                        now_ts: int = None) -> list:
+    """Parse one RSS feed into the public-summary contract."""
+    history_urls = history_urls or set()
+    now_ts = int(time.time()) if now_ts is None else now_ts
+    cutoff_ts = now_ts - recency_hours * 3600
+    root = ET.fromstring(xml_data)
+    out = []
+    seen_urls = set()
+
+    for item in root.findall('.//item'):
+        title = _strip_rss_html(item.findtext('title') or '')
+        url = (item.findtext('link') or '').strip()
+        canonical_url = canonicalize_external_url(url)
+        if not title or not canonical_url or canonical_url in seen_urls:
+            continue
+        if canonical_url in history_urls:
+            continue
+
+        date_value = item.findtext('pubDate') or item.findtext(
+            '{http://purl.org/dc/elements/1.1/}date'
+        ) or ''
+        ts = _parse_rss_timestamp(date_value)
+        if not ts or ts < cutoff_ts:
+            continue
+
+        excerpt = _strip_rss_html(item.findtext('description') or '')[:300]
+        out.append({
+            'source': source,
+            'title': title,
+            'excerpt': excerpt,
+            'url': url,
+            'date': datetime.fromtimestamp(ts).strftime('%m-%d'),
+            'ts': ts,
+            'content_level': 'rss_summary',
+        })
+        seen_urls.add(canonical_url)
+
+    out.sort(key=lambda item: item['ts'], reverse=True)
+    return out[:limit]
+
+
+def fetch_external_rss(history_urls=None, recency_hours: int = 168,
+                       per_source: int = 15) -> dict:
+    """Fetch public Bloomberg/WSJ/FT RSS candidates for the writer."""
+    history_urls = history_urls or set()
+    result = {'_errors': []}
+    headers = {
+        'User-Agent': 'MarketDashboard/10.0 RSS Reader',
+        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+    }
+    for source, url in EXTERNAL_RSS_FEEDS.items():
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                xml_data = response.read()
+            recent_items = _parse_external_rss(
+                xml_data,
+                source,
+                history_urls=set(),
+                recency_hours=recency_hours,
+                limit=per_source,
+            )
+            result[source] = _parse_external_rss(
+                xml_data,
+                source,
+                history_urls=history_urls,
+                recency_hours=recency_hours,
+                limit=per_source,
+            )
+            if not recent_items:
+                result['_errors'].append(
+                    f'{source}: no RSS items within {recency_hours}h'
+                )
+        except Exception as exc:
+            result[source] = []
+            result['_errors'].append(f'{source}: {exc}')
+    return result
 
 
 def is_similar(title_a: str, title_b: str, threshold: float = SIMILARITY_THRESHOLD) -> bool:
@@ -451,7 +637,7 @@ def fetch_community(keywords, recency_hours=72):
             items = []
             for item in data.get('data', []):
                 title = item.get('title', '').replace('<em>', '').replace('</em>', '').strip()
-                if not title:
+                if not title or not is_useful_community_title(title):
                     continue
                 try:
                     ts = int(item.get('publish_time', '0'))
@@ -468,12 +654,157 @@ def fetch_community(keywords, recency_hours=72):
     return all_posts
 
 
-# 研报选题（板块题材放宽；A股研报会在下面按 6 位代码剔除）
-_RESEARCH_QUERIES = ['英伟达', '美光', '半导体', 'AI 算力', '科技股 评级',
-                     '芯片 评级', '新能源车', '互联网 科技']
+def is_useful_community_title(title: str) -> bool:
+    """Keep only titles that carry an actual retail view or market signal."""
+    title = (title or '').strip()
+    if not title:
+        return False
+    if len(title) > 6:
+        return True
+    return any(word in title for word in _COMMUNITY_SIGNAL_WORDS)
 
 
-def fetch_research(history_ids=None, recency_hours=72, limit=5):
+def _clean_search_name(name: str) -> str:
+    return (name or '').replace('-W', '').replace('-S', '').replace(
+        '集团', ''
+    ).replace('控股', '').strip()
+
+
+def _skip_market_keyword(name: str) -> bool:
+    skip_words = {
+        'ETF', '指数', '期货', '美元', '港元', '黄金', '白银', '人民币', '主连',
+        '日经', '标普', '纳指', '道琼斯', '恒生', '沪深', '上证', '创业板',
+    }
+    return not name or any(word in name for word in skip_words)
+
+
+def collect_hotspot_keywords(hotspots: dict, limit=8) -> list:
+    """Extract searchable company names from yfinance/Futu hotspot data."""
+    if not isinstance(hotspots, dict):
+        return []
+    out = []
+    for key in ('top_gainers', 'top_losers', 'most_actives'):
+        for item in hotspots.get(key, []) or []:
+            out.append(item.get('name') or item.get('sym'))
+    for sector in hotspots.get('hot_sectors', []) or []:
+        for leader in sector.get('leaders', []) or []:
+            out.append(leader.get('name') or leader.get('sym'))
+    cleaned = []
+    seen = set()
+    for name in out:
+        clean = _clean_search_name(str(name))
+        if _skip_market_keyword(clean) or clean in seen:
+            continue
+        seen.add(clean)
+        cleaned.append(clean)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def build_research_queries(stock_names=None, hotspots=None, limit=24) -> list:
+    """Build a broad but bounded research-report keyword universe."""
+    out = []
+    seen = set()
+
+    def add_group(group, cap):
+        added = 0
+        for name in group:
+            clean = _clean_search_name(str(name))
+            if _skip_market_keyword(clean) or clean in seen:
+                continue
+            seen.add(clean)
+            out.append(clean)
+            added += 1
+            if len(out) >= limit or added >= cap:
+                break
+
+    add_group(RESEARCH_THEME_QUERIES, 6)
+    add_group(list(stock_names or []), 5)
+    add_group(collect_hotspot_keywords(hotspots, limit=8), 5)
+    add_group(RESEARCH_FALLBACK_KEYWORDS, limit)
+    return out
+
+
+def build_community_keywords(stock_names, limit=20):
+    """Build a wider but still focused community-search list.
+
+    Futu community search is sparse and only returns titles. Searching only the
+    first few watchlist names often leaves the brief with one usable symbol, so
+    we combine cleaned watchlist names with a small US tech/semiconductor
+    fallback basket and let recency filtering decide what is usable.
+    """
+    out = []
+    seen = set()
+    for name in list(stock_names or []) + COMMUNITY_FALLBACK_KEYWORDS:
+        clean = _clean_search_name(str(name))
+        if _skip_market_keyword(clean) or clean in seen:
+            continue
+        seen.add(clean)
+        out.append(clean)
+        if len(out) >= limit:
+            break
+    return out
+
+# 研报独立去重窗口（天）：比新闻的 7 天短，研报召回浅、shelf-life 长，可跨天复现。
+RESEARCH_DEDUP_DAYS = 2
+# 研报至少凑够几条；不足时从新闻板块提升「机构评级」类条目补足
+RESEARCH_MIN_ITEMS = 3
+# 判定一条新闻其实是「机构研报/评级」的关键词（命中即可提升到研报板块）。
+# 刻意不含裸的 "维持/上调/下调" —— 它们也出现在"维持/上调利率"等货币政策语境，
+# 会把宏观新闻误判成研报；评级类标题基本都带 "评级/目标价"，由它们兜住。
+_RESEARCH_KEYWORDS = ['评级', '目标价', '跑赢大市', '跑输大市', '重申', '首予',
+                      '增持', '减持', '看至', '分析师', 'outperform', 'overweight',
+                      'underweight', 'strong buy', 'price target']
+
+
+def supplement_research_from_news(research_data, news_data, min_items=RESEARCH_MIN_ITEMS,
+                                  history_ids=None):
+    """研报不足 min_items 时，从已召回的新闻板块里把「机构评级/目标价」类条目提升到研报。
+
+    被提升的条目会**从原新闻板块移除**，避免同一条在新闻和研报里各出现一次。
+    候选板块：个股 / AI动态 / 科技消费 / 宏观大宗（最可能混入评级类新闻）。
+    """
+    if len(research_data) >= min_items:
+        return research_data
+    import re
+    if history_ids is None:
+        history_ids = set()
+    a_share_re = re.compile(r'[（(]\d{6}[)）]')
+    seen_titles = [r['title'] for r in research_data]
+    seen_ids = {r.get('news_id') for r in research_data}
+
+    cand_sections = [k for k in news_data
+                     if k.startswith('个股_') or k in ('AI动态', '科技消费', '宏观大宗')]
+    promoted = []
+    for sec in cand_sections:
+        kept = []
+        for it in news_data[sec]:
+            title = it.get('title', '')
+            nid = it.get('news_id', '')
+            if (len(research_data) + len(promoted) < min_items
+                    and nid not in seen_ids
+                    and nid not in history_ids
+                    and not a_share_re.search(title)
+                    and any(k in title for k in _RESEARCH_KEYWORDS)
+                    and not any(is_similar(title, t) for t in seen_titles)):
+                promoted.append({
+                    'title': title, 'date': it.get('date'), 'url': it.get('url'),
+                    'news_id': nid, 'ts': it.get('ts'), 'from_news': True,
+                })
+                seen_titles.append(title)
+                seen_ids.add(nid)
+                # 不放回 kept → 从原板块移除
+            else:
+                kept.append(it)
+        news_data[sec] = kept
+
+    merged = research_data + promoted
+    merged.sort(key=lambda x: x.get('ts', 0), reverse=True)
+    return merged
+
+
+def fetch_research(history_ids=None, recency_hours=72, limit=5, queries=None):
     """机构研报/评级（Futu news_type=3）。仅保留美股+港股，剔除 A股（标题含 6 位代码）。
 
     多题材召回 → 历史去重 → 近 72h → 剔除 A股 → 主题相似度去重 → 按时间取 N 条。
@@ -486,7 +817,7 @@ def fetch_research(history_ids=None, recency_hours=72, limit=5):
     a_share_re = re.compile(r'[（(]\d{6}[)）]')  # A股 6 位代码，如 (603713)/（002025）
 
     pool = {}
-    for q in _RESEARCH_QUERIES:
+    for q in queries or build_research_queries():
         items = _fetch_raw_news(q, size=10, news_type=3)
         if items and isinstance(items[0], dict) and '_error' in items[0]:
             continue
@@ -543,13 +874,16 @@ def main():
     # 从自选股获取名称，用于个股新闻搜索
     stock_names = get_watchlist_names()
     # 筛选出适合搜新闻的核心标的名
-    skip_words = {'ETF', '指数', '期货', '美元', '港元', '黄金', '白银', '人民币', '主连'}
+    skip_words = {
+        'ETF', '指数', '期货', '美元', '港元', '黄金', '白银', '人民币', '主连',
+        '日经', '标普', '纳指', '道琼斯', '恒生', '沪深', '上证', '创业板',
+    }
     core_names = []
     for n in stock_names:
         if not n or any(s in n for s in skip_words):
             continue
         # 清理后缀
-        clean = n.replace('-W','').replace('-S','').replace('集团','').replace('控股','')
+        clean = _clean_search_name(n)
         # 优先用中文名，英文名也保留
         core_names.append(clean)
     # 去重并取前 6 个
@@ -577,12 +911,13 @@ def main():
     for name in top_stocks:
         news_keywords_grouped.append((f'个股_{name}', [name]))
 
-    # 社区搜索关键词（聚焦自选股，去掉泛 'A股'——它只会带回过期泛帖）
-    # 取前 6 只：有些标的近 72h 无帖，多覆盖几只才能凑够 ~3 只有讨论的
-    community_keywords = top_stocks[:6] if top_stocks else ['英伟达', '美光', '腾讯', '理想汽车']
+    # 社区搜索关键词：社区接口召回稀疏，扩大到更多自选股 + 美股科技 fallback。
+    # 最终 brief 仍必须只引用有原话、有信息量的近 72h 帖子。
+    community_keywords = build_community_keywords(core_names or top_stocks)
 
     # 加载历史已发送 news_id（跨天去重）
     history_ids = load_news_history()
+    external_history_urls = load_external_news_history()
 
     # 并行拉取所有数据
     # 显式按时区计算，避免依赖系统本地时区（用户搬到 LA 后 PT 时区，原代码假设 ET 已失效）
@@ -591,8 +926,20 @@ def main():
     et_now = now_utc.astimezone(ZoneInfo("America/New_York"))
     bj_now = now_utc.astimezone(ZoneInfo("Asia/Shanghai"))
 
+    hotspots_data = fetch_hotspots()
     news_data = fetch_news(news_keywords_grouped, history_ids=history_ids)
-    research_data = fetch_research(history_ids=history_ids)
+    # 研报用更短的独立去重窗口（避免被新闻 7 天历史拖到长期空）
+    research_history_ids = load_news_history(max_days=RESEARCH_DEDUP_DAYS)
+    research_queries = build_research_queries(core_names, hotspots=hotspots_data)
+    research_data = fetch_research(
+        history_ids=research_history_ids,
+        queries=research_queries,
+    )
+    # 仍不足时，从新闻板块提升「机构评级」类条目补足（并从原板块移除避免重复）
+    research_data = supplement_research_from_news(
+        research_data, news_data, history_ids=history_ids)
+    external_rss = fetch_external_rss(history_urls=external_history_urls)
+    community_data = fetch_community(community_keywords)
 
     # 收集本次拉取的所有 news_id（供 send_email.py 写入历史；研报也参与跨天去重）
     used_news_ids = []
@@ -611,17 +958,30 @@ def main():
         'date': pt_now.strftime('%Y-%m-%d'),
         '_pipeline_stats': {
             'history_ids_loaded': len(history_ids),
+            'research_history_window_days': RESEARCH_DEDUP_DAYS,
+            'research_history_ids_loaded': len(research_history_ids),
+            'research_queries_count': len(research_queries),
             'news_returned': sum(len(v) for v in news_data.values()),
             'research_returned': len(research_data),
+            'research_supplemented': sum(1 for r in research_data if r.get('from_news')),
+            'external_history_urls_loaded': len(external_history_urls),
+            'external_rss_returned': sum(
+                len(items) for source, items in external_rss.items()
+                if source != '_errors'
+            ),
+            'community_keywords_count': len(community_keywords),
+            'community_symbols_with_posts': sum(1 for items in community_data.values() if items),
+            'community_posts_returned': sum(len(items) for items in community_data.values()),
             'used_news_ids_count': len(used_news_ids),
         },
         'used_news_ids': used_news_ids,
         'futu_quotes': fetch_futu_quotes(),
         'yfinance_quotes': fetch_yfinance_quotes(),
-        'hotspots': fetch_hotspots(),
+        'hotspots': hotspots_data,
         'news': news_data,
         'research': research_data,
-        'community': fetch_community(community_keywords),
+        'community': community_data,
+        'external_rss': external_rss,
     }
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)

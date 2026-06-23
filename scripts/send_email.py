@@ -235,9 +235,19 @@ def markdown_to_html(md_text: str) -> str:
 
     content = '\n'.join(result_lines)
 
-    # Highlight percentages with color
-    content = re.sub(r'(\+\d+\.?\d*%)', r'<span class="pos">\1</span>', content)
-    content = re.sub(r'(-\d+\.?\d*%)', r'<span class="neg">\1</span>', content)
+    # Highlight percentages with color. Prefer signed values, but also support
+    # natural Chinese phrasing such as "涨 1.5%" emitted by generated briefs.
+    content = re.sub(r'(\+\d+(?:\.\d+)?%)', r'<span class="pos">\1</span>', content)
+    content = re.sub(r'(-\d+(?:\.\d+)?%)', r'<span class="neg">\1</span>', content)
+    content = re.sub(
+        r'((?:上涨|涨|下跌|跌)(?:幅)?\s*\d+(?:\.\d+)?%)',
+        lambda match: (
+            f'<span class="neg">{match.group(1)}</span>'
+            if match.group(1).startswith(('下跌', '跌'))
+            else f'<span class="pos">{match.group(1)}</span>'
+        ),
+        content,
+    )
 
     # --- Wrap in responsive HTML ---
     html = f"""<!DOCTYPE html>

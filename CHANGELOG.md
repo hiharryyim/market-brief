@@ -4,6 +4,16 @@
 
 ---
 
+## V10.1 · 2026-06-22 — RSS 基础层 + Chrome 条件深读
+- `fetch_data.py` 新增 Bloomberg、WSJ、FT 公开 RSS，输出最多 300 字符摘要到 `external_rss`；无近期条目的 feed 明确为空并走降级路径
+- RSS 候选在拉取阶段应用 7 天规范化 URL 历史去重
+- Chrome 从“所有外媒必读”改为条件升级：媒体视角、复杂因果、精确数字/引语、摘要不足或核心个股事件才读全文
+- 正常每封深读 1-3 篇；Chrome 失败时优先退回 RSS 基础摘要，再由 Futu 兜底
+- 明确 `content_level=rss_summary` 数据边界，禁止根据公开摘要扩写未提供的事实
+- 扩展机构研报关键词池：主题词、自选股、当日美股热点、Mag7 / AI / 半导体 fallback 均进入 Futu `news_type=3` 查询
+- 扩展社区观察关键词池：从前 6 个自选股扩大到更大自选股 + 美股科技/半导体 fallback，并过滤低信息短标题
+- 四个 routine 增加正文自检，防止 `JSON`、`research`、`community`、`Chrome 验证页`、`样本不足` 等内部过程话术进入邮件正文
+
 ## V10 · 2026-06-19 — 订阅外媒增强正式上线
 - 通过本地已登录 Chrome 读取 Bloomberg、Financial Times、Wall Street Journal 原站正文；Agent Reach/Exa 只做候选发现
 - 国际、宏观、AI、个股/行业四个板块均采用「外媒增强 + Futu 兜底」，Chrome 或单一媒体失败不阻断整封 brief

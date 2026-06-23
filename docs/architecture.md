@@ -15,11 +15,12 @@ flowchart TD
         Y[yfinance<br/>indices·commodities·FX·rates]
         FN[Futu News API<br/>news_type 1 / 3]
         FC[Futu Community API]
-        D[Agent Reach / publisher homepages<br/>candidate discovery only]
-        C[Logged-in Chrome<br/>Bloomberg · FT · WSJ]
+        R[Publisher RSS<br/>Bloomberg · FT · WSJ]
+        D[Agent Reach / publisher homepages<br/>extra discovery only]
+        C[Logged-in Chrome<br/>conditional deep reads]
     end
 
-    F & Y & FN & FC --> P[fetch_data.py<br/>multi-stage pipeline]
+    F & Y & FN & FC & R --> P[fetch_data.py<br/>multi-stage pipeline]
     P --> J[(market_data.json<br/>structured contract)]
     J --> AI{{Agent writes the brief<br/>never fabricates}}
     D -.candidate URLs.-> AI
@@ -35,26 +36,37 @@ flowchart TD
 
 1. **Quotes / 行情** — `fetch_futu_quotes()` pulls the watchlist (HK/US). Snapshots are *batch-atomic*: one unsupported ticker fails the whole batch, so failures **degrade to per-ticker** and record skips. yfinance fills indices/commodities/FX/rates.
 2. **News pipeline / 新闻** — `fetch_news()`: multi-query recall → history dedupe (7-day cache) → cross-section dedupe → recency window (breaking 48h / trend 7d) → title-similarity dedupe → stock-name trap filter → source weighting → time×weight ranking.
-3. **Research / 研报** — `fetch_research()`: Futu `news_type=3` (analyst ratings), US+HK only (A-shares dropped), recent, deduped.
+3. **Research / 研报** — `fetch_research()`: Futu `news_type=3` (analyst ratings), US+HK only (A-shares dropped), recent, deduped. The query universe is bounded but broader than the watchlist: theme queries, selected watchlist names, current US hotspot movers, and Mag7 / AI / semiconductor fallback names.
 4. **Hotspots / 热点** — `fetch_hotspots()`: yfinance screeners discover movers → Futu `get_owner_plate` maps to sectors → frequency rank → overlap-dedupe + noise filter.
-5. **Community / 社区** — `fetch_community()`: recent (72h), US-focused; each post is a real retail voice (title only).
-6. **Emit / 输出** — one JSON to stdout; `used_news_ids` feeds the 7-day dedupe cache on send.
+5. **Community / 社区** — `fetch_community()`: recent (72h), broader watchlist + US tech / semiconductor keyword pool; each post is a real retail voice (title only). Short low-signal titles are filtered before writing.
+6. **Publisher RSS / 外媒摘要** — `fetch_external_rss()`: public title + bounded excerpt → seven-day freshness filter → canonical URL history dedupe. Stale feeds return no candidates.
+7. **Emit / 输出** — one JSON to stdout; `used_news_ids` feeds the 7-day dedupe cache on send.
 
-## V10 subscription-media stage / V10 订阅外媒阶段
+## V10.1 two-tier publisher stage / V10.1 两层外媒阶段
 
-Subscription journalism is deliberately kept out of `fetch_data.py`: the Python process has no access to the user's browser login. During writing, the local agent discovers candidates and reads the original Bloomberg / FT / WSJ article through the logged-in Chrome session.
+`fetch_data.py` collects public Bloomberg / FT / WSJ RSS titles and excerpts without browser credentials. During writing, the agent upgrades only selected high-value stories to original full-text reads through logged-in Chrome; the Python process never accesses the browser session.
 
-订阅外媒刻意不放进 `fetch_data.py`：Python 进程不接触浏览器登录态。写作阶段由本地 agent 发现候选，并通过已登录 Chrome 读取 Bloomberg / FT / WSJ 原文。
+`fetch_data.py` 在不接触浏览器凭证的情况下获取 Bloomberg / FT / WSJ 公开 RSS 标题与摘要。写作阶段只有高价值文章才升级为已登录 Chrome 原文深读；Python 进程始终不接触浏览器登录态。
 
 Rules / 规则：
 
 1. International gets 1 external item; macro, AI, and stock/industry get 1-2 each. Every section also keeps at least one Futu item.
-2. Normal target is 5-7 external stories across at least two publishers. Relevance beats publisher quotas.
+2. Normal target is 5-7 external stories across at least two publishers; usually only 1-3 require Chrome full-text reads.
 3. Breaking international/macro stories use a 48h window; AI and stock/industry trends may use 7 days.
 4. The same event appears once across publishers and sections. Futu and an external source may share one source line.
 5. `sent_external_news_history.json` stores canonical URLs (query strings/fragments removed) for seven-day cross-routine dedupe.
-6. Chrome/publisher failure is non-blocking. The section falls back to Futu; Bloomberg robot checks are never bypassed.
+6. Chrome failure is non-blocking: use the RSS excerpt when sufficient, otherwise fall back to another publisher or Futu.
 7. Cookies and browser storage stay local and are never exported to Agent Reach, Exa, or Jina.
+
+## Writer guardrails / 正文输出防线
+
+The final Markdown is reader-facing, not an execution log. The scheduled prompts require a lightweight pre-send scan of `/tmp/market_brief.md`; it fails the run if process-only terms such as raw JSON field names, browser verification failures, unreadable-source logs, or sample-count explanations leak into the brief.
+
+最终 Markdown 是给读者看的报告，不是执行日志。四个 schedule 在发送前都会对 `/tmp/market_brief.md` 做轻量扫描；如果字段名、浏览器验证失败、来源不可读、样本数量解释等过程性话语进入正文，流程必须先重写再发送。
+
+Research and community sections remain data-driven rather than hard-thresholded: use actual available items, write only reader-visible wording when coverage is sparse, and never pad with generic sentiment.
+
+研报和社区板块不设置未经确认的硬门槛：按实际可用内容写；覆盖不足时只用读者可见话术或省略空内容，不能用泛泛情绪判断凑数。
 
 ## Output contract / 输出契约 (`market_data.json`)
 
@@ -65,7 +77,14 @@ The pipeline's only output is this JSON. The writer reads it and **must not inve
   "timestamp_pt": "2026-06-12 13:33 PT",      // explicit zoneinfo, not system tz
   "timestamp_bj": "2026-06-13 04:33 北京时间",
   "date": "2026-06-12",
-  "_pipeline_stats": { "news_returned": 35, "research_returned": 5, ... },
+  "_pipeline_stats": {
+    "news_returned": 35,
+    "research_queries_count": 24,
+    "research_returned": 5,
+    "community_keywords_count": 20,
+    "community_posts_returned": 8,
+    ...
+  },
   "used_news_ids": ["post:...", ...],          // written to 7-day dedupe cache on send
 
   "futu_quotes":    { "US.NVDA": {"name","last","prev","chg"}, "_failed_codes":[...] },
@@ -81,11 +100,15 @@ The pipeline's only output is this JSON. The writer reads it and **must not inve
 
   "news":     { "国际局势":[{"title","date","url","news_id"}], "宏观大宗":[...], ... },
   "research": [ {"title","date","url","news_id"} ],
-  "community":{ "美光科技":[{"title","date"}], ... }   // titles = real retail posts
+  "community":{ "美光科技":[{"title","date"}], ... },  // titles = real retail posts
+  "external_rss": {                              // public summaries, not full text
+    "Bloomberg": [{"title","excerpt","url","date","content_level"}],
+    "WSJ": [...], "FT": [...], "_errors": []
+  }
 }
 ```
 
-External articles are not injected into this JSON. The agent records the exact URLs it used in `/tmp/used_external_urls.json`; after a successful send, `send_email.py --external-urls-file` updates the rolling external history cache.
+Public RSS candidates are included in `external_rss`; subscription full text is never stored in the JSON. The agent records every external URL actually used, whether RSS-only or Chrome-deep-read, in `/tmp/used_external_urls.json`; after a successful send, `send_email.py --external-urls-file` updates the rolling external history cache.
 
 ## Brief structure / Brief 结构
 
@@ -100,4 +123,4 @@ The writer turns that JSON into a fixed Markdown skeleton (rendered to mobile-fi
 
 The macro section includes a clearly attributed **Media View** followed by a **Core Observation** that cross-checks those views against rates, FX, commodities, and equity data.
 
-The four [`routines/`](../routines/) prompts share the same V10 media protocol and differ only in session focus (Asia pre-open / Asia midday / US pre-open / US close).
+The four [`routines/`](../routines/) prompts share the same V10.1 media protocol, writer guardrails, and research/community expansion rules; they differ only in session focus (Asia pre-open / Asia midday / US pre-open / US close).

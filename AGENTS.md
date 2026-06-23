@@ -1,12 +1,12 @@
-# MarketDashboard - V10 Agent Instructions
+# MarketDashboard - V10.1 Agent Instructions
 
 二级市场投资辅助工具，运行于 Codex/Claude 桌面环境，每天 4 次生成并通过 Gmail SMTP 推送「哈利每日 Market Brief」。
 
 ## 当前版本
 
-**V10：订阅外媒 Chrome 增强 + Futu 兜底 + 四板块媒体覆盖。**
+**V10.1：公开 RSS 基础摘要 + 订阅外媒 Chrome 条件深读 + Futu 兜底。**
 
-行情与 Futu 新闻由 `scripts/fetch_data.py` 生成结构化 JSON；订阅外媒由 agent 在写作阶段通过已登录 Chrome 读取 Bloomberg、FT、WSJ 原站正文。
+行情、Futu 新闻和 Bloomberg/FT/WSJ 公开 RSS 候选由 `scripts/fetch_data.py` 生成结构化 JSON；agent 只对高价值文章通过已登录 Chrome 深读原站正文。
 
 ## 数据源
 
@@ -16,29 +16,32 @@
 | 美股全市场热点 | yfinance screeners + Futu `get_owner_plate` | 为空则省略 |
 | A股指数、商品、汇率、利率 | yfinance | LSEG/省略 |
 | 基础新闻与兜底 | Futu News API | 省略低质量条目 |
-| 机构研报 | Futu `news_type=3` | 为空则说明无结果 |
-| 订阅外媒 | Chrome：Bloomberg / FT / WSJ | Futu News |
-| 外媒候选发现 | 媒体首页 / Agent Reach Exa | 直接浏览媒体栏目 |
-| 社区观点 | Futu Community API | 为空则省略 |
+| 机构研报 | Futu `news_type=3`，覆盖自选股、Mag7、AI/半导体与美股热点 | 为空则用读者可见话术说明 |
+| 外媒基础信息 | Bloomberg / FT / WSJ 公开 RSS（仅近期有效 feed 动态参与） | Futu News |
+| 订阅外媒深读 | 已登录 Chrome 原站正文（条件升级） | RSS 摘要 / Futu News |
+| 外媒候选发现 | JSON `external_rss` / 媒体首页 / Agent Reach Exa | 直接浏览媒体栏目 |
+| 社区观点 | Futu Community API，覆盖更大自选股池 + 美股科技/半导体 fallback | 为空则省略或读者化说明 |
 
 ## Futu Pipeline
 
-`scripts/fetch_data.py` 已实现：多查询召回、7 天历史去重、跨板块去重、48h/7d 时效窗口、标题相似度去重、个股短名陷阱过滤、来源加权、时间排序、研报过滤、社区近 72h 过滤和美股热点发现。
+`scripts/fetch_data.py` 已实现：多查询召回、7 天历史去重、跨板块去重、48h/7d 时效窗口、标题相似度去重、个股短名陷阱过滤、来源加权、时间排序、研报过滤、研报关键词扩展、社区近 72h 过滤、社区关键词扩展和美股热点发现。
 
 硬性规则：
 - JSON 中没有的数据不得编造；缺失时只描述方向或省略。
+- 最终 brief 不得暴露字段名、工具状态或降级过程；正文禁止出现 `JSON`、`research`、`community`、`Chrome`、`验证页`、`不可读`、`未提供`、`样本不足` 等内部过程词。
 - 测试邮件不传历史文件参数；生产邮件必须传。
 - 美股热点只进入 `brief-us-preopen` 和 `brief-us-close`；`hot_sectors` 为空则整节省略。
+- 研报和社区按模板写实际可用内容；数量不足时不得暴露返回数量、字段名或补写空泛判断。
 
-## V10 订阅外媒协议
+## V10.1 订阅外媒协议
 
 ### 获取与安全
 
-1. 正文只通过本地已登录 Chrome 读取 Bloomberg、FT、WSJ 原站。
-2. Chrome 需要保持运行、扩展已连接、账号已登录；失败时直接使用 Futu 兜底，不能中断整封 brief。
-3. Agent Reach/Exa 只做候选发现，不作为订阅正文来源。
-4. 不读取、导出或转发 cookie/localStorage；不把订阅凭证交给 Exa/Jina。
-5. Bloomberg 出现 `Are you a robot?` 时不绕过；无人值守任务跳过该来源。
+1. 默认读取 JSON `external_rss` 的公开标题与最多 300 字符摘要；只写摘要明确支持的事实。某家 feed 无近期条目时视为空，不得使用过期内容凑数。
+2. 媒体视角、复杂因果、精确数字/引语、摘要不完整或核心个股事件才升级到已登录 Chrome 原站深读；通常每封 1-3 篇。
+3. Chrome 失败但 RSS 信息充分时降级为基础摘要；否则舍弃并由其他外媒或 Futu 补齐，不能中断整封 brief。
+4. Agent Reach/Exa 只做候选发现，不作为订阅正文来源。不读取、导出或转发 cookie/localStorage。
+5. 所有 schedule 均按无人值守运行。Bloomberg 验证页只正常刷新一次，仍失败则降级；不得自动操作 CAPTCHA、使用外部破解服务或规避付费墙。
 
 ### 四板块配额
 
@@ -71,6 +74,8 @@
 8. A股 / 港股市场
 9. 社区观察
 10. 宏观环境
+
+「深度研报 / 机构观点」和「社区观察」不得写成执行日志；数据不足时只用读者可见话术或省略空内容。
 
 「宏观环境」必须包含：美债收益率、美元/外汇、大宗商品、**媒体视角**、**核心观察**。媒体视角与 agent 判断要分开，核心观察必须用 JSON 行情交叉验证媒体观点。
 

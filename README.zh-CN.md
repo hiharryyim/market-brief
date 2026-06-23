@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-> 一个本地自动化 agent：按交易时段编纂并推送每日市场简报，并通过已登录浏览器补充订阅外媒。
+> 一个本地自动化 agent：按交易时段编纂并推送每日市场简报，以公开 RSS 获取外媒基础信息，并按需通过已登录浏览器深读订阅原文。
 
 [![Not Investment Advice](https://img.shields.io/badge/⚠️-不构成投资建议-orange)]() [![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-blue)]()
 
@@ -29,27 +29,27 @@
 - **定时推送** —— 每天 4 班（亚盘前瞻 / 亚盘午间 / 美盘前瞻 / 美盘收盘），各自针对所属时段。
 - **多阶段新闻 pipeline** —— 多查询召回、历史与跨板块去重、时效窗口、标题相似度过滤、来源加权。
 - **全市场热点扫描** —— 发现整个美股市场在异动的板块，不依赖自选股。
-- **机构研报摘要** —— 近期评级与目标价变动（美股 & 港股）。
-- **社区情绪** —— 引用股民帖子原话，而非泛泛概括。
-- **订阅外媒增强** —— 通过用户已登录的 Chrome 读取 Bloomberg、FT、WSJ，同时在四个目标板块保留 Futu 兜底，外媒失败不影响发送。
+- **扩展机构研报摘要** —— Futu `news_type=3` 覆盖自选股、Mag7 / AI / 半导体主题和当日美股热点异动股。
+- **扩展社区情绪** —— 从更大的自选股 + 美股科技/半导体关键词池引用股民帖子原话，而非泛泛概括。
+- **两层外媒增强** —— Bloomberg、FT、WSJ 的近期公开 RSS 提供基础摘要；无新鲜feed的媒体及核心文章通过已登录 Chrome 补充，同时保留 Futu 兜底。
 - **外媒跨 routine 去重** —— 规范化文章 URL 保留 7 天，避免一天四封简报反复出现同一篇订阅报道。
-- **有据可循的写作** —— agent 绝不编造数字；数据缺失时只描述方向。
+- **读者可见的有据写作** —— agent 绝不编造数字，工作流会拦截字段名、浏览器失败、样本数量等内部过程话术。
 - **移动端优先输出** —— 响应式 HTML 邮件，涨红跌绿。
 
 ## 架构
 
 ```
 市场数据 ──► fetch_data.py ──► market_data.json ──► agent 撰写简报 ──► send_email.py ──► 邮件
-(Futu · yfinance ·  (pipeline:        (结构化            (JSON + 已验证             (Markdown →         (Gmail SMTP,
- Futu 新闻/社区)     去重/过滤)         数据契约)          订阅外媒)                  响应式 HTML)        BCC 给团队)
+(Futu · yfinance ·  (pipeline:        (结构化            (RSS 基础信息 +           (Markdown →         (Gmail SMTP,
+ 新闻 · RSS)         去重/过滤)         数据契约)          条件深读)                  响应式 HTML)        BCC 给团队)
                                                         ▲
-                                      已登录 Chrome：Bloomberg · FT · WSJ
+                                      已登录 Chrome：精选 BBG · FT · WSJ
 
            ▲
    Claude Code 定时任务（每天 4 次）触发流程
 ```
 
-Python pipeline 输出一份 JSON 作为行情数据契约；agent 只有在通过 Chrome 读取原站正文后，才补充订阅媒体内容。Chrome 或媒体失败时继续使用 Futu 新闻。这既保证市场数字有据可循，也提高了背景信息质量。完整数据流、pipeline 阶段与 JSON schema 见 [`docs/architecture.md`](docs/architecture.md)。
+Python pipeline 输出包含行情、Futu 内容和外媒公开摘要的 JSON；agent 用摘要处理基础事实，只有高价值文章才通过已登录 Chrome 深读。Chrome 失败不会中断流程：摘要充分则继续使用，否则换其他来源或 Futu。完整数据流、pipeline 阶段与 JSON schema 见 [`docs/architecture.md`](docs/architecture.md)。
 
 ## 输入与输出
 
@@ -62,7 +62,7 @@ Python pipeline 输出一份 JSON 作为行情数据契约；agent 只有在通�
 - **行情** —— Futu OpenAPI（港/美），yfinance（指数、商品、汇率、利率）
 - **热点** —— yfinance 预设筛选器 + Futu `get_owner_plate`
 - **新闻 / 研报 / 社区** —— Futu News API（`news_type` 1/3）+ Futu Community
-- **订阅外媒** —— 已登录 Chrome（Bloomberg、Financial Times、Wall Street Journal）；Agent Reach/Exa 只做候选发现
+- **订阅外媒** —— 官方 RSS 基础摘要 + 已登录 Chrome 条件深读（Bloomberg、Financial Times、Wall Street Journal）；Agent Reach/Exa 只做候选发现
 - **推送** —— Gmail SMTP，移动端优先 HTML
 - **编排** —— Claude Code 定时任务（cron，本地执行）
 
@@ -72,7 +72,7 @@ Python pipeline 输出一份 JSON 作为行情数据契约；agent 只有在通�
 .
 ├── README.md / README.zh-CN.md   # 本页（英文 / 中文）
 ├── CLAUDE.md                      # agent 遵循的内部项目规格
-├── CHANGELOG.md                   # 版本历史（V4 → V10）
+├── CHANGELOG.md                   # 版本历史（V4 → V10.1）
 ├── docs/
 │   ├── architecture.md            # 数据流、pipeline 阶段、JSON schema
 │   └── design-notes.md            # 关键设计决策与取舍
@@ -86,7 +86,7 @@ Python pipeline 输出一份 JSON 作为行情数据契约；agent 只有在通�
 
 ## 演进历史
 
-项目经过多轮迭代（V4 → V10），每一步都由实际运行中遇到的具体限制驱动。值得一提的设计决策与取舍写在 [`docs/design-notes.md`](docs/design-notes.md)；完整版本历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+项目经过多轮迭代（V4 → V10.1），每一步都由实际运行中遇到的具体限制驱动。值得一提的设计决策与取舍写在 [`docs/design-notes.md`](docs/design-notes.md)；完整版本历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 免责声明
 

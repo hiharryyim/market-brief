@@ -1,0 +1,6 @@
+# news4alpha 实时新闻 API 配置模板
+# 使用方式：复制本文件为 news4alpha.conf，填入真实 key
+# 注意 news4alpha.conf 已被 .gitignore，不会提交到 git
+
+# 管理员发放的 API key，当密码对待，勿外泄
+NEWS4ALPHA_API_KEY=replace_with_your_news4alpha_api_key
