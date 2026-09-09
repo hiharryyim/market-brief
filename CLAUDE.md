@@ -106,16 +106,19 @@
 - **`--news-ids-file`**：发送成功后写入 Futu `news_id` 历史 cache
 - **`--external-urls-file`**：发送成功后写入规范化外媒 URL 历史 cache
 
-## 定时任务（4 个，本地执行，时区 PT）
+## 定时任务（4 个，本地执行，时区 ET）
 
-用户 2026-05-27 从纽约 ET 搬到洛杉矶 PT，4 个 routine cron 已同步调整。
+用户 2026-05-27 从纽约搬到洛杉矶（PT），2026-09-08 搬回纽约（ET）；4 个 routine cron 已按 ET 重新设定。
+机器时区为 `America/New_York`，**cron 按本地时间解释**，因此下表就是实际触发时间。
 
-| Task ID | 时间 (PT) | 对应市场 | 内容侧重 |
-|---------|----------|----------|----------|
-| brief-asia-preopen | 6PM 周日-周四 | 北京次日 9AM | 美股收盘 → 亚盘前瞻 |
-| brief-asia-midday | 8:30PM 周日-周四 | 北京次日 11:30AM | A股/港股上午盘 → 下午盘关注 |
-| brief-us-preopen | 6AM 周一-周五 | ET 9AM | 亚盘收盘 → 美盘前瞻 |
-| brief-us-close | 1:30PM 周一-周五 | ET 4:30PM | 美股全天 → 次日亚盘展望 |
+| Task ID | 时间 (ET) | cron | 对应市场 | 内容侧重 |
+|---------|----------|------|----------|----------|
+| brief-asia-preopen | 9PM 周日-周四 | `0 21 * * 0-4` | 北京次日 9AM | 美股收盘 → 亚盘前瞻 |
+| brief-asia-midday | 11:30PM 周日-周四 | `30 23 * * 0-4` | 北京次日 11:30AM | A股/港股上午盘 → 下午盘关注 |
+| brief-us-preopen | 9AM 周一-周五 | `0 9 * * 1-5` | ET 9AM | 亚盘收盘 → 美盘前瞻 |
+| brief-us-close | 4:30PM 周一-周五 | `30 16 * * 1-5` | ET 4:30PM | 美股全天 → 次日亚盘展望 |
+
+> **夏令时提醒**：以上按 EDT（北京 = ET+12）设定。11 月切回 EST 后北京 = ET+13，两个亚盘 routine 对应的北京时间会顺延 1 小时（9AM→10AM、11:30AM→12:30PM）。届时若要维持北京时点，把亚盘两个 cron 各提前 1 小时改为 `0 20` 和 `30 22`。
 
 **当前状态：V10.2 已提交。仓库 `routines/` 与 `~/.claude/scheduled-tasks/brief-*/SKILL.md` 四份运行时 prompt 已同步；4 个本地 schedule 当前为暂停（`enabled=false`），恢复前先确认 Futu OpenD 在 `127.0.0.1:11111` 监听。生产任务无 `--test`，发送给团队 13 人。**
 
@@ -123,12 +126,12 @@
 
 fetch_data.py 用 `zoneinfo` 显式按时区计算，**不依赖系统本地时区**。
 JSON 提供 4 个时间字段：
-- `timestamp_pt` — 洛杉矶时间（用户当前所在）
-- `timestamp_et` — 纽约时间
+- `timestamp_et` — 纽约时间（用户当前所在）
+- `timestamp_pt` — 洛杉矶时间（保留字段）
 - `timestamp_bj` — 北京时间（市场所在）
-- `date` — PT 日期
+- `date` — ET 日期（用户所在时区，与邮件标题的 `date +%Y-%m-%d` 一致）
 
-Routine 模板里时点显示 `[JSON.timestamp_bj] / [JSON.timestamp_pt]`。
+Routine 模板里时点显示 `[JSON.timestamp_bj] / [JSON.timestamp_et]`。
 
 ## 关键文件
 

@@ -1,6 +1,6 @@
 ---
 name: brief-asia-preopen
-description: 亚盘开盘前 Market Brief（PT 6PM 周日-周四 = 北京 9AM 次日）
+description: 亚盘开盘前 Market Brief（ET 9PM 周日-周四 = 北京 9AM 次日）
 ---
 
 你是 MarketDashboard 的自动化分析师。数据已由脚本拉取，AI 不需要自己调 Futu API，直接读 JSON、写分析、发邮件。
@@ -75,7 +75,7 @@ cat /tmp/market_data.json
 ```markdown
 # Market Brief · [JSON.date] 亚盘开盘前
 
-> 时点：[JSON.timestamp_bj] / [JSON.timestamp_pt]，美股收盘后/亚盘开盘前
+> 时点：[JSON.timestamp_bj] / [JSON.timestamp_et]，美股收盘后/亚盘开盘前
 
 ## 一、市场综述
 

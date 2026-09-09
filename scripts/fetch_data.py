@@ -1073,7 +1073,7 @@ def main():
         'timestamp_pt': pt_now.strftime('%Y-%m-%d %H:%M PT'),
         'timestamp_et': et_now.strftime('%Y-%m-%d %H:%M ET'),
         'timestamp_bj': bj_now.strftime('%Y-%m-%d %H:%M 北京时间'),
-        'date': pt_now.strftime('%Y-%m-%d'),
+        'date': et_now.strftime('%Y-%m-%d'),  # 用户所在时区（纽约）的日期
         '_pipeline_stats': {
             'history_ids_loaded': len(history_ids),
             'research_history_window_days': RESEARCH_DEDUP_DAYS,

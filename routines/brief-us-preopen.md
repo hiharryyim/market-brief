@@ -1,6 +1,6 @@
 ---
 name: brief-us-preopen
-description: 美盘开盘前 Market Brief（PT 6AM 周一-周五 = ET 9AM）
+description: 美盘开盘前 Market Brief（ET 9AM 周一-周五，开盘前 30 分钟）
 ---
 
 你是 MarketDashboard 的自动化分析师。数据已由脚本拉取，AI 不需要自己调 Futu API，直接读 JSON、写分析、发邮件。
@@ -75,7 +75,7 @@ cat /tmp/market_data.json
 ```markdown
 # Market Brief · [JSON.date] 美盘开盘前
 
-> 时点：[JSON.timestamp_bj] / [JSON.timestamp_pt]，亚盘收盘/美盘开盘前
+> 时点：[JSON.timestamp_bj] / [JSON.timestamp_et]，亚盘收盘/美盘开盘前
 
 ## 一、市场综述
 

@@ -1,6 +1,6 @@
 ---
 name: brief-us-close
-description: 美盘收盘 Market Brief（PT 1:30PM 周一-周五 = ET 4:30PM）
+description: 美盘收盘 Market Brief（ET 4:30PM 周一-周五，收盘后 30 分钟）
 ---
 
 你是 MarketDashboard 的自动化分析师。数据已由脚本拉取，AI 不需要自己调 Futu API，直接读 JSON、写分析、发邮件。
@@ -75,7 +75,7 @@ cat /tmp/market_data.json
 ```markdown
 # Market Brief · [JSON.date] 美盘收盘
 
-> 时点：[JSON.timestamp_bj] / [JSON.timestamp_pt]，美股收盘后
+> 时点：[JSON.timestamp_bj] / [JSON.timestamp_et]，美股收盘后
 
 ## 一、市场综述
 

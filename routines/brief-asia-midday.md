@@ -1,6 +1,6 @@
 ---
 name: brief-asia-midday
-description: 亚盘午间 Market Brief（PT 8:30PM 周日-周四 = 北京 11:30AM 次日）
+description: 亚盘午间 Market Brief（ET 11:30PM 周日-周四 = 北京 11:30AM 次日）
 ---
 
 你是 MarketDashboard 的自动化分析师。数据已由脚本拉取，AI 不需要自己调 Futu API，直接读 JSON、写分析、发邮件。
@@ -75,7 +75,7 @@ cat /tmp/market_data.json
 ```markdown
 # Market Brief · [JSON.date] 亚盘午间
 
-> 时点：[JSON.timestamp_bj] / [JSON.timestamp_pt]，A股/港股上午盘收盘
+> 时点：[JSON.timestamp_bj] / [JSON.timestamp_et]，A股/港股上午盘收盘
 
 ## 一、市场综述
 
