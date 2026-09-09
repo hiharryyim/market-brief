@@ -103,9 +103,9 @@ cat /tmp/market_data.json
 
 ## 二、🔥 隔夜美股热点（全市场异动 · 非自选股）
 
-> 数据来自 `JSON.hotspots`（yfinance 全市场异动榜 + Futu 板块归纳），反映**上一交易日美股**异动。**全部照抄真实数据，严禁编造**；若 `hotspots.hot_sectors` 为空则整节省略。
+> 数据来自 `JSON.hotspots`（yfinance 全市场异动榜 + Futu 板块归纳），反映**上一交易日美股**异动。**全部照抄真实数据，严禁编造**；`hot_sectors` 为空时**只省略「热点板块」这一小段**，领涨/领跌/最活跃照常写；只有 `top_gainers`、`top_losers`、`most_actives` 也全为空时才整节省略。
 
-**隔夜热点板块（按异动个股数排序，取前 3-4 个）：**
+**隔夜热点板块（按异动个股数排序，取前 3-4 个），`hot_sectors` 为空则跳过本小段）：**
 - **[hot_sectors[].name；有 aka 时写成「主名/别名」]**（[count] 只）：[leaders 取前 3，格式 公司名/ticker +X.X%]
 - …
 

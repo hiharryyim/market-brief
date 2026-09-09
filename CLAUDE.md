@@ -52,7 +52,7 @@
 
 输出结构：`hotspots = { hot_sectors:[{name, aka, count, leaders}], top_gainers, top_losers, most_actives, _errors }`
 
-**只进 brief-us-preopen / brief-us-close 两个美股 routine**（数据是美股的）；亚盘两个 routine 不放。港股暂缓（yfinance 港股混入窝轮/牛熊证太脏）。**写时严禁编造**，`hot_sectors` 为空则整节省略。
+**只进 brief-us-preopen / brief-us-close 两个美股 routine**（数据是美股的）；亚盘两个 routine 不放。港股暂缓（yfinance 港股混入窝轮/牛熊证太脏）。**写时严禁编造**；`hot_sectors` 为空时只省略「热点板块」小段，领涨/领跌/最活跃照常写（OpenD 不可用时 yfinance 异动榜仍然有数），三者全空才整节省略。
 
 ## V10.2 Brief 结构（7 板块 + 四板块外媒增强）
 
