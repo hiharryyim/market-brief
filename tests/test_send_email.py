@@ -20,6 +20,16 @@ class MarkdownPercentageColorTests(unittest.TestCase):
         self.assertIn('<span class="pos">上涨0.10%</span>', html)
         self.assertIn('<span class="neg">下跌2.88%</span>', html)
 
+    def test_new_external_source_lines_are_wrapped(self):
+        html = markdown_to_html(
+            "[NYT](https://www.nytimes.com/a) | 06-22\n"
+            "[Washington Post](https://www.washingtonpost.com/b) | 06-22"
+        )
+
+        self.assertEqual(html.count('class="news-source"'), 2)
+        self.assertIn('>NYT</a> | 06-22', html)
+        self.assertIn('>Washington Post</a> | 06-22', html)
+
 
 if __name__ == "__main__":
     unittest.main()

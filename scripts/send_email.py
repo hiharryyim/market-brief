@@ -206,8 +206,8 @@ def markdown_to_html(md_text: str) -> str:
     lines = content.split('\n')
     result_lines = []
     in_list = False
-    # 匹配 [富途|Bloomberg|Reuters|WSJ|FT|CNBC|...] | MM-DD 格式的来源行
-    news_source_re = re.compile(r'<a\s+href="[^"]*"[^>]*>(富途|Bloomberg|Reuters|WSJ|FT|CNBC|The Economist|Barron\'s|SCMP|Financial Times|Wall Street Journal)</a>\s*\|\s*\d{2}-\d{2}')
+    # 匹配 [富途|Bloomberg|Reuters|WSJ|FT|NYT|...] | MM-DD 格式的来源行
+    news_source_re = re.compile(r'<a\s+href="[^"]*"[^>]*>(富途|Bloomberg|Reuters|WSJ|FT|NYT|Washington Post|CNBC|The Economist|Barron\'s|SCMP|Financial Times|Wall Street Journal|The New York Times)</a>\s*\|\s*\d{2}-\d{2}')
 
     for line in lines:
         stripped = line.strip()

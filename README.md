@@ -31,7 +31,7 @@ Four scheduled tasks trigger this flow automatically around market opens and clo
 - **Market-wide hotspot scan** — surfaces sectors moving across the entire US market, independent of the watchlist.
 - **Expanded analyst research digest** — Futu `news_type=3` coverage spans watchlist names, Mag7 / AI / semiconductor themes, and current US hotspot movers.
 - **Wider community sentiment** — quotes real retail posts from a broader watchlist + US tech / semiconductor keyword pool rather than generic summaries.
-- **Two-tier publisher enrichment** — recent public Bloomberg, FT, and WSJ RSS items provide baseline summaries when available; stale feeds and selected high-value stories fall through to logged-in Chrome, with Futu as a non-blocking fallback.
+- **Two-tier publisher enrichment** — recent public Bloomberg, FT, WSJ, NYT, and Washington Post RSS items provide baseline summaries when available; stale feeds and selected high-value stories fall through to logged-in Chrome, with Futu as a non-blocking fallback.
 - **Cross-routine external dedupe** — canonical article URLs are retained for seven days so the four daily briefs do not repeat the same subscription story.
 - **Grounded reader-facing writing** — the agent never fabricates figures and the workflow rejects internal process language such as raw field names, browser failures, and sample-count logs.
 - **Mobile-first output** — responsive HTML email with China-convention coloring.
@@ -43,7 +43,7 @@ Market data ──► fetch_data.py ──► market_data.json ──► agent w
 (Futu · yfinance ·   (pipeline:        (structured        (RSS baseline +          (Markdown →         (Gmail SMTP,
  News · RSS)          dedupe/filter)    data contract)      conditional deep read)   responsive HTML)    BCC to team)
                                                         ▲
-                                      logged-in Chrome: selected BBG · FT · WSJ
+                                      logged-in Chrome: selected publisher originals
 
            ▲
    Claude Code scheduled tasks (4×/day) trigger the flow
@@ -62,7 +62,7 @@ The Python pipeline emits one JSON document containing market data, Futu content
 - **Quotes** — Futu OpenAPI (HK/US), yfinance (indices, commodities, FX, rates)
 - **Hotspots** — yfinance predefined screeners + Futu `get_owner_plate`
 - **News / research / community** — Futu News API (`news_type` 1/3) + Futu Community
-- **Subscription media** — official RSS summaries plus conditional logged-in Chrome deep reads (Bloomberg, Financial Times, Wall Street Journal); Agent Reach/Exa is discovery-only
+- **Subscription media** — official RSS summaries plus conditional logged-in Chrome deep reads (Bloomberg, Financial Times, Wall Street Journal, NYT, Washington Post); Agent Reach/Exa is discovery-only
 - **Delivery** — Gmail SMTP, mobile-first HTML
 - **Orchestration** — Claude Code scheduled tasks (cron, local execution)
 
@@ -72,7 +72,7 @@ The Python pipeline emits one JSON document containing market data, Futu content
 .
 ├── README.md / README.zh-CN.md   # this page (EN / 中文)
 ├── CLAUDE.md                      # internal project spec the agent follows
-├── CHANGELOG.md                   # version history (V4 → V10.1)
+├── CHANGELOG.md                   # version history (V4 → V10.2)
 ├── docs/
 │   ├── architecture.md            # data flow, pipeline stages, JSON schema
 │   └── design-notes.md            # key design decisions and trade-offs
@@ -86,7 +86,7 @@ The Python pipeline emits one JSON document containing market data, Futu content
 
 ## Development history
 
-The project evolved across many iterations (V4 → V10.1), each driven by a concrete limitation encountered while running it live. The notable design decisions and trade-offs are written up in [`docs/design-notes.md`](docs/design-notes.md); the full version history is in [`CHANGELOG.md`](CHANGELOG.md).
+The project evolved across many iterations (V4 → V10.2), each driven by a concrete limitation encountered while running it live. The notable design decisions and trade-offs are written up in [`docs/design-notes.md`](docs/design-notes.md); the full version history is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Disclaimer
 

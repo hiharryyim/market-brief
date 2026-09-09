@@ -25,32 +25,34 @@ cat /tmp/market_data.json
 - 「深度研报 / 机构观点」和「社区观察」按模板原规则写实际可用内容；数量不足时不要暴露返回数量、字段名或补写空泛判断。
 - 不得把模板提示、括号中的写作说明、字段名或自检结果留在最终 brief。
 
-## 步骤 3：V10 两层外媒补充（RSS 基础摘要 + Chrome 条件深读 + Futu 兜底）
+## 步骤 3：V10.2 两层外媒补充（RSS 基础摘要 + Chrome 条件深读 + Futu 兜底）
 
 ### 获取路径
-1. 优先读取 JSON.`external_rss`。这些候选来自 Bloomberg / FT / WSJ 公开 RSS，已过滤 7 天以前的旧条目，并按 `sent_external_news_history.json` 排除过去 7 天用过的 URL；某家 feed 为空时不得用旧内容凑数。`content_level=rss_summary` 表示只有标题和最多 300 字符公开摘要，**不是完整正文**。
+1. 优先读取 JSON.`external_rss`。这些候选来自 Bloomberg / FT / WSJ / NYT / Washington Post 公开 RSS，已过滤 7 天以前的旧条目，并按 `sent_external_news_history.json` 排除过去 7 天用过的 URL；某家 feed 为空时不得用旧内容凑数。`content_level=rss_summary` 表示只有标题和最多 300 字符公开摘要，**不是完整正文**。
 2. RSS 摘要足以确认“谁、做了什么、何时发生”及摘要中明确给出的数字时，可以直接写 1-2 句基础事实；不得补写摘要未提供的原因、引语、数字或结论。
 3. 只有满足以下任一条件时才通过已登录 Chrome 打开原文深读，正常每封升级 **1-3 篇**：
    - 文章将进入「媒体视角」或支撑「核心观察」；
    - 需要解释复杂因果、争议、政策机制、财报/指引细节；
    - 需要精确数字、原话，或 RSS 摘要过短、语义不完整；
    - 文章对应自选股/显著异动，是本封 brief 的核心事件。
-4. Chrome 深读必须来自 Bloomberg / FT / WSJ 原站，不得读取、导出或转发 cookie/localStorage。若 Chrome 或原文失败：RSS 信息足够则降级为 RSS 基础摘要；信息不足则舍弃该条并由其他外媒或 Futu 补齐，整封 brief 不得中断。
+4. Chrome 深读必须来自实际采用的外媒原站，不得读取、导出或转发 cookie/localStorage。若 Chrome 或原文失败：RSS 信息足够则降级为 RSS 基础摘要；信息不足则舍弃该条并由其他外媒或 Futu 补齐，整封 brief 不得中断。
 5. 本 schedule 按无人值守运行。Bloomberg 出现 `Are you a robot?` 时，只正常刷新原文章页一次；若仍为验证页立即降级。不得自动操作 CAPTCHA、使用外部破解服务、导出凭证或规避付费墙。
 6. Agent Reach/Exa 仅可补充候选发现，不作为订阅正文来源。完成后关闭本次创建的临时标签页。
 
 ### 板块配额（四个板块都必须保留 Futu）
-- **国际局势 / 地缘**：1 条外媒 + 至少 1 条 Futu。
-- **宏观 / 央行 / 大宗**：1-2 条外媒 + 至少 1 条 Futu。
-- **AI / 大模型 / 芯片**：1-2 条外媒 + 至少 1 条 Futu。
+- **国际局势 / 地缘**：至少 3 条新闻信息；至少 1 条外媒 + 至少 1 条 Futu。
+- **宏观 / 央行 / 大宗**：至少 3 条新闻信息；至少 1 条外媒 + 至少 1 条 Futu。
+- **AI / 大模型 / 芯片**：至少 3 条新闻信息；至少 1 条外媒 + 至少 1 条 Futu。
 - **个股 / 行业聚焦**：1-2 条外媒 + 至少 1 条 Futu。优先级：自选股/显著异动 > 业绩与指引 > 并购/资本开支 > 行业结构变化。
-- 正常使用 5-7 条外媒，至少覆盖 2 家；其中 Chrome 全文深读通常 1-3 条，其余可使用信息充分的 RSS 基础摘要，不为凑数量牺牲相关性。
+- 正常使用 7-10 条外媒信息，至少覆盖 2 家；其中 Chrome 全文深读通常 1-3 条，其余可使用信息充分的 RSS 基础摘要，不为凑数量牺牲相关性。
 
 ### 质量与去重
 - 国际/宏观优先近 48 小时；AI/个股趋势类最多 7 天。
 - RSS 条目只能写 `title + excerpt` 明确支持的事实；Chrome 条目只能写实际读到的原文事实。翻译成中文并给出具体文章 URL。
-- 同一事件跨媒体、Futu 和板块只保留一条，可在同一来源行并列链接；不得在 AI 与个股板块重复。
+- 同一事件跨媒体、Futu 和板块只保留一条，优先写成“一个标题 + 综合摘要 + 多来源并列来源行”；不得拆成多条凑数量，也不得在 AI 与个股板块重复。
 - 个股外媒必须和 JSON 行情/热点异动互相验证，不得脱离当日市场强行加入。
+- 写法固定采用本轮测试邮件风格：标题短、摘要 2-3 句，第一句交代事实，后续句把外媒事实、Futu 事实和行情交叉验证；避免堆砌列表、避免泛泛宏观空话。
+- 国际/宏观/AI 三个板块各至少 3 个不同新闻条目；若同一事件有 NYT/Washington Post/WSJ/FT/Bloomberg/富途等多来源，合并到同一条新闻中，这是优先写法而不是重复。
 
 外媒新闻格式：
 ```
@@ -58,6 +60,10 @@ cat /tmp/market_data.json
 2-3句中文摘要。
 
 [Bloomberg](具体URL) | MM-DD
+```
+多来源合并格式：
+```
+[Washington Post](具体URL) | MM-DD · [NYT](具体URL) | MM-DD · [富途](具体URL) | MM-DD
 ```
 
 ## 步骤 4：撰写 Brief 写入 /tmp/market_brief.md
@@ -97,19 +103,19 @@ cat /tmp/market_data.json
 ## 二、重点新闻
 
 #### 🌍 国际局势 / 地缘
-[1 条外媒 + news.国际局势；至少 1 条 Futu]
+[至少 3 条新闻信息；至少 1 条外媒 + news.国际局势 中至少 1 条 Futu；同一事件多来源必须合并为一条]
 
 #### 🏛️ 宏观 / 央行 / 大宗
-[1-2 条外媒 + news.宏观大宗；至少 1 条 Futu]
+[至少 3 条新闻信息；至少 1 条外媒 + news.宏观大宗 中至少 1 条 Futu；优先写利率、美元、商品、央行和能源]
 
 #### 🤖 AI / 大模型 / 芯片
-[1-2 条外媒 + news.AI动态；至少 1 条 Futu]
+[至少 3 条新闻信息；至少 1 条外媒 + news.AI动态 中至少 1 条 Futu；优先写 AI 商业化、算力、半导体设备/材料]
 
 #### 📊 个股 / 行业聚焦
 [1-2 条外媒 + news.个股_xxx；至少 1 条 Futu；同事件允许合并双来源]
 
 #### 📑 深度研报 / 机构观点
-[research 中选 3-4 条机构评级/深度点评；不足 3-4 条时只写实际可用条目，空则用读者可见话术说明近期暂无可用机构评级更新。**同一研报的 EN/CN 两条要合并只留一条**（如 Wolfe Research 与"沃尔夫研究"同一目标价）。格式同新闻条目，来源标 [富途]]
+[research 中按优先级选 3-4 条机构评级/深度点评：自选股优先，其次 Mag7，再其次 AI/半导体/新能源车等相关行业，最后才用市场热点股补位；不要把本节写成热点股信息大杂烩。不足 3-4 条时只写实际可用条目，空则用读者可见话术说明近期暂无可用机构评级更新。**同一研报的 EN/CN 两条要合并只留一条**（如 Wolfe Research 与"沃尔夫研究"同一目标价）。格式同新闻条目，来源标 [富途]]
 
 #### 📱 A股 / 港股市场
 [news.市场动态 + 部分 news.科技消费]
@@ -131,7 +137,7 @@ cat /tmp/market_data.json
 - [黄金/白银/原油]
 
 **媒体视角：**
-- [提炼 1-2 条 FT/Bloomberg/WSJ 对宏观环境的观点，并明确这是媒体判断]
+- [提炼 1-2 条外媒对宏观环境的观点，并明确这是媒体判断]
 
 **核心观察：**
 - [把媒体观点与 JSON 的利率/美元/商品/权益数据交叉验证后给出判断]
@@ -150,7 +156,7 @@ cat /tmp/market_data.json
 ```
 - URL 从 JSON 原样复制
 - `[来源](url) | MM-DD` **独占一行，上方留空行**
-- 来源标签：`[富途]`/`[Bloomberg]`/`[WSJ]`/`[FT]`
+- 来源标签：`[富途]`/`[Bloomberg]`/`[WSJ]`/`[FT]`/`[NYT]`/`[Washington Post]`
 - 同一事件合并来源时可写：`[WSJ](url) | MM-DD · [富途](url) | MM-DD`
 
 涨跌：`+`涨 `-`跌
@@ -159,6 +165,7 @@ cat /tmp/market_data.json
 
 ```bash
 python3 - <<'PY'
+import re
 from pathlib import Path
 text = Path('/tmp/market_brief.md').read_text(encoding='utf-8')
 forbidden = [
@@ -169,6 +176,18 @@ forbidden = [
 hits = [word for word in forbidden if word in text]
 if hits:
     raise SystemExit('正文仍包含内部过程词，需要先重写: ' + ', '.join(hits))
+required_sections = [
+    '🌍 国际局势 / 地缘',
+    '🏛️ 宏观 / 央行 / 大宗',
+    '🤖 AI / 大模型 / 芯片',
+]
+for section in required_sections:
+    m = re.search(r'^####\s+' + re.escape(section) + r'\s*\n(.*?)(?=^####\s+|\Z)', text, re.S | re.M)
+    if not m:
+        raise SystemExit(f'缺少重点新闻板块: {section}')
+    count = len(re.findall(r'^\*\*[^*\n].*\*\*\s*$', m.group(1), re.M))
+    if count < 3:
+        raise SystemExit(f'{section} 至少需要 3 条新闻信息，当前 {count} 条')
 PY
 ```
 
@@ -183,7 +202,7 @@ json.dump(d.get('used_news_ids', []), open('/tmp/used_news_ids.json', 'w'))
 "
 ```
 
-将本次 brief **实际使用的 Bloomberg/FT/WSJ URL**（无论只用 RSS 摘要还是已用 Chrome 深读）以 JSON 数组写入 `/tmp/used_external_urls.json`；没有则写 `[]`。不要写 Futu URL。
+将本次 brief **实际使用的外媒 URL**（无论只用 RSS 摘要还是已用 Chrome 深读）以 JSON 数组写入 `/tmp/used_external_urls.json`；没有则写 `[]`。不要写 Futu URL。
 
 ## 步骤 7：发送邮件（生产模式：发给团队全员）
 ```bash

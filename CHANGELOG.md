@@ -4,6 +4,19 @@
 
 ---
 
+## V10.2 · 2026-09-08 — 外媒五源 + 板块条数下限 + 研报主题限额
+> 本版改动 6 月下旬完成，6/26–8/28 已用生产收件人连续实盘验证约两个月，此次统一整理后才提交。
+
+- 外媒 RSS 从 3 家扩到 5 家：新增 NYT（World/Business/Economy/Technology 四个栏目 feed 合并为单一 `NYT` 来源）与 Washington Post；WSJ 迁到现行端点 `feeds.content.dowjones.io`
+- 新增 `_merge_external_items()`：同一家媒体的多个 feed 按规范化 URL 去重，同 URL 保留最新一条
+- 外媒配额 5-7 条 → **7-10 条**；同一事件跨媒体优先合并为「一个标题 + 综合摘要 + 多来源并列来源行」，不再拆成多条凑数
+- 国际、宏观、AI 三个板块固定**至少 3 条新闻信息**，四个 routine 增加发送前自检，不足 3 条直接拦截
+- 机构研报改为有优先级的聚焦召回：自选股 → Mag7 → AI/半导体/新能源车等相关行业 → 市场热点股兜底
+- 研报新增主题限额 `RESEARCH_PER_SUBJECT_CAP = 2`：按优先级**轮转**选条，同一公司最多 2 条（标题跨查询命中同名公司也计入），修掉「5 条研报 4 条微软」的刷屏问题
+- 新增 `_opend_available()`：行情、热点归纳、自选股三处先探测 `127.0.0.1:11111`，OpenD 不可用时快速降级而非挂起
+- `send_email.py` 来源标签支持 `NYT` / `Washington Post` / `The New York Times`
+- 测试 13 → 15：新增多 feed 合并、研报优先级、研报主题限额、跨查询主题计数、新来源标签用例
+
 ## V10.1 · 2026-06-22 — RSS 基础层 + Chrome 条件深读
 - `fetch_data.py` 新增 Bloomberg、WSJ、FT 公开 RSS，输出最多 300 字符摘要到 `external_rss`；无近期条目的 feed 明确为空并走降级路径
 - RSS 候选在拉取阶段应用 7 天规范化 URL 历史去重

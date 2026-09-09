@@ -31,7 +31,7 @@
 - **全市场热点扫描** —— 发现整个美股市场在异动的板块，不依赖自选股。
 - **扩展机构研报摘要** —— Futu `news_type=3` 覆盖自选股、Mag7 / AI / 半导体主题和当日美股热点异动股。
 - **扩展社区情绪** —— 从更大的自选股 + 美股科技/半导体关键词池引用股民帖子原话，而非泛泛概括。
-- **两层外媒增强** —— Bloomberg、FT、WSJ 的近期公开 RSS 提供基础摘要；无新鲜feed的媒体及核心文章通过已登录 Chrome 补充，同时保留 Futu 兜底。
+- **两层外媒增强** —— Bloomberg、FT、WSJ、NYT、Washington Post 的近期公开 RSS 提供基础摘要；无新鲜 feed 的媒体及核心文章通过已登录 Chrome 补充，同时保留 Futu 兜底。
 - **外媒跨 routine 去重** —— 规范化文章 URL 保留 7 天，避免一天四封简报反复出现同一篇订阅报道。
 - **读者可见的有据写作** —— agent 绝不编造数字，工作流会拦截字段名、浏览器失败、样本数量等内部过程话术。
 - **移动端优先输出** —— 响应式 HTML 邮件，涨红跌绿。
@@ -43,7 +43,7 @@
 (Futu · yfinance ·  (pipeline:        (结构化            (RSS 基础信息 +           (Markdown →         (Gmail SMTP,
  新闻 · RSS)         去重/过滤)         数据契约)          条件深读)                  响应式 HTML)        BCC 给团队)
                                                         ▲
-                                      已登录 Chrome：精选 BBG · FT · WSJ
+                                      已登录 Chrome：精选外媒原站
 
            ▲
    Claude Code 定时任务（每天 4 次）触发流程
@@ -62,7 +62,7 @@ Python pipeline 输出包含行情、Futu 内容和外媒公开摘要的 JSON；
 - **行情** —— Futu OpenAPI（港/美），yfinance（指数、商品、汇率、利率）
 - **热点** —— yfinance 预设筛选器 + Futu `get_owner_plate`
 - **新闻 / 研报 / 社区** —— Futu News API（`news_type` 1/3）+ Futu Community
-- **订阅外媒** —— 官方 RSS 基础摘要 + 已登录 Chrome 条件深读（Bloomberg、Financial Times、Wall Street Journal）；Agent Reach/Exa 只做候选发现
+- **订阅外媒** —— 官方 RSS 基础摘要 + 已登录 Chrome 条件深读（Bloomberg、Financial Times、Wall Street Journal、NYT、Washington Post）；Agent Reach/Exa 只做候选发现
 - **推送** —— Gmail SMTP，移动端优先 HTML
 - **编排** —— Claude Code 定时任务（cron，本地执行）
 
@@ -72,7 +72,7 @@ Python pipeline 输出包含行情、Futu 内容和外媒公开摘要的 JSON；
 .
 ├── README.md / README.zh-CN.md   # 本页（英文 / 中文）
 ├── CLAUDE.md                      # agent 遵循的内部项目规格
-├── CHANGELOG.md                   # 版本历史（V4 → V10.1）
+├── CHANGELOG.md                   # 版本历史（V4 → V10.2）
 ├── docs/
 │   ├── architecture.md            # 数据流、pipeline 阶段、JSON schema
 │   └── design-notes.md            # 关键设计决策与取舍
@@ -86,7 +86,7 @@ Python pipeline 输出包含行情、Futu 内容和外媒公开摘要的 JSON；
 
 ## 演进历史
 
-项目经过多轮迭代（V4 → V10.1），每一步都由实际运行中遇到的具体限制驱动。值得一提的设计决策与取舍写在 [`docs/design-notes.md`](docs/design-notes.md)；完整版本历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+项目经过多轮迭代（V4 → V10.2），每一步都由实际运行中遇到的具体限制驱动。值得一提的设计决策与取舍写在 [`docs/design-notes.md`](docs/design-notes.md)；完整版本历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 免责声明
 

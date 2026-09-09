@@ -2,7 +2,7 @@
 
 二级市场投资辅助工具集，集成在 Claude/Codex 桌面环境中运行，自动化生成并通过 Gmail SMTP 推送 Market Brief。
 
-## 当前版本：V10.1（RSS 基础摘要 + Chrome 条件深读 + Futu 兜底）
+## 当前版本：V10.2（外媒五源 + 板块条数下限 + 研报主题限额）
 
 ## 数据源优先级：Futu → yfinance/LSEG；外媒先 RSS，必要时升级 Chrome 原站
 
@@ -15,10 +15,10 @@
 | 黄金/白银/原油/汇率 | **yfinance** | LSEG |
 | 美10Y收益率 | **yfinance** ^TNX | — |
 | 金融新闻（基础召回+兜底） | **Futu News API**（无需 OpenD） | — |
-| **机构研报 / 评级** | **Futu News `news_type=3`**（限美股+港股） | — |
-| **外媒基础信息** | **Bloomberg / FT / WSJ 公开 RSS（仅近期有效 feed）** | Futu News |
+| **机构研报 / 评级** | **Futu News `news_type=3`**（限美股+港股；自选股 → Mag7 → 相关行业 → 市场热点股兜底） | — |
+| **外媒基础信息** | **Bloomberg / FT / WSJ / NYT / Washington Post 公开 RSS（仅近期有效 feed）** | Futu News |
 | **订阅外媒深读** | **已登录 Chrome 原站（条件升级）** | RSS 摘要 / Futu News |
-| **外媒候选发现** | 三家媒体首页 / Agent Reach Exa | Futu News |
+| **外媒候选发现** | 媒体首页 / Agent Reach Exa | Futu News |
 | 社区情绪 | **Futu 社区 API**（无需 OpenD） | — |
 
 ## V8 新闻 Pipeline（多阶段过滤）
@@ -37,7 +37,7 @@
 8. **时间×权重排序**：每板块取 N 条
 9. **输出 used_news_ids**：`send_email.py --news-ids-file` 写入历史 cache（新闻+研报都参与跨天去重）
 
-**📑 深度研报**（`fetch_research()`，独立于上面 pipeline）：`news_type=3` 多题材召回机构评级/深度点评 → 关键词覆盖自选股、Mag7、AI/半导体和美股热点 → 历史去重 → 近 72h → **剔除 A股（标题含 6 位代码）只留美股+港股** → 相似度去重 → 取 5 条。
+**📑 深度研报**（`fetch_research()`，独立于上面 pipeline）：`news_type=3` 多题材召回机构评级/深度点评 → 按自选股、Mag7、AI/半导体/新能源车等相关行业、市场热点股兜底排序 → 历史去重 → 近 72h → **剔除 A股（标题含 6 位代码）只留美股+港股** → 相似度去重 → **按优先级轮转取 5 条，同一公司最多 2 条**（`RESEARCH_PER_SUBJECT_CAP`，标题命中同名公司也算，防止单只票刷满整栏）。
 
 **💬 社区**（`fetch_community()`）：接口每条只有标题（=股民观点原话），无正文/互动数。关键词扩展为更多自选股 + 美股科技/半导体 fallback，只取**近 72h**；brief 里只直接引用原话，不做空话概括。
 
@@ -54,29 +54,30 @@
 
 **只进 brief-us-preopen / brief-us-close 两个美股 routine**（数据是美股的）；亚盘两个 routine 不放。港股暂缓（yfinance 港股混入窝轮/牛熊证太脏）。**写时严禁编造**，`hot_sectors` 为空则整节省略。
 
-## V10.1 Brief 结构（7 板块 + 四板块外媒增强）
+## V10.2 Brief 结构（7 板块 + 四板块外媒增强）
 
 > 美股 routine 在「一、市场综述」与「重点新闻」之间多一个 **二、🔥 今日热点**（全市场异动，见上）；综述里商品/利率只点结论，详数留「宏观环境」。
 
 ### 板块结构（严格顺序，7 板块）
-1. **🌍 国际局势 / 地缘**（1 条外媒 + 至少 1 条 Futu）
-2. **🏛️ 宏观 / 央行 / 大宗**（1-2 条外媒 + 至少 1 条 Futu）
-3. **🤖 AI / 大模型 / 芯片**（1-2 条外媒 + 至少 1 条 Futu）
+1. **🌍 国际局势 / 地缘**（至少 3 条新闻信息；至少 1 条外媒 + 至少 1 条 Futu）
+2. **🏛️ 宏观 / 央行 / 大宗**（至少 3 条新闻信息；至少 1 条外媒 + 至少 1 条 Futu）
+3. **🤖 AI / 大模型 / 芯片**（至少 3 条新闻信息；至少 1 条外媒 + 至少 1 条 Futu）
 4. **📊 个股 / 行业聚焦**（1-2 条外媒 + 至少 1 条 Futu）
-5. **📑 深度研报 / 机构观点**（Futu News `news_type=3`，限美股+港股，剔除A股）
+5. **📑 深度研报 / 机构观点**（Futu News `news_type=3`，限美股+港股，剔除A股；选股优先级：自选股 > Mag7 > 相关行业 > 热点股兜底）
 6. **📱 A股 / 港股市场**（Futu News）
 7. **💬 社区观察**（Futu Community API，近72h，引用帖子原话）
 
-研报和社区按实际可用内容写；数量不足时不得写“本次仅返回/样本不足/未补写”等过程说明。
+研报和社区按实际可用内容写；数量不足时不得写“本次仅返回/样本不足/未补写”等过程说明。研报栏不得一上来写市场热点股，只有自选股、Mag7 和相关行业研报不足时，才用热点股补位。
 
-### V10.1 两层外媒（Bloomberg / FT / WSJ）
+### V10.2 两层外媒（Bloomberg / FT / WSJ / NYT / Washington Post）
 - **基础路径**：`fetch_data.py` 获取公开 RSS 标题与最多 300 字符摘要，写入 `external_rss`；无近期条目的 feed 返回空，不使用过期内容。
 - **深读路径**：媒体视角、复杂因果、精确数字/引语、摘要不完整或核心个股事件才通过已登录 Chrome 读取原文，通常每封 1-3 篇。
 - **降级路径**：Chrome 失败但 RSS 信息充分则使用基础摘要；否则舍弃并由其他外媒或 Futu 补齐，整封 brief 继续发送。
 - **反自动化边界**：所有 schedule 均按无人值守运行。Bloomberg 出现 `Are you a robot?` 时只正常刷新原文一次；若仍为验证页，立即跳过并降级。不得自动操作 CAPTCHA、使用外部破解服务、导出凭证或规避付费墙，也不得阻塞整封 brief。
-- **配额**：正常 5-7 条外媒，至少覆盖 2 家；有合适内容时尽量覆盖三家，但不强凑。
+- **配额**：正常 7-10 条外媒信息，至少覆盖 2 家；有合适内容时尽量覆盖更多来源，但不强凑。
 - **时效**：国际/宏观优先 48h；AI/个股趋势类最多 7 天。
-- **去重**：同一事件跨媒体、跨板块只保留一条，可把外媒与 Futu 合并为双来源；外媒 URL 写入 `cache/sent_external_news_history.json` 做 7 天跨 routine 去重。
+- **多来源合并**：同一事件跨媒体、跨板块只保留一条，优先写成“一个标题 + 2-3 句综合摘要 + 多来源并列来源行”；不得拆成多条凑数量。外媒 URL 写入 `cache/sent_external_news_history.json` 做 7 天跨 routine 去重。
+- **写法风格**：延续最新测试邮件风格，标题短，摘要先交代事实，再把外媒、Futu 与行情交叉验证；国际/宏观/AI 三个板块各至少 3 个不同新闻条目。
 - **个股优先级**：自选股/显著异动 > 业绩与指引 > 并购/资本开支 > 行业结构变化。
 - **宏观环境**：新增「媒体视角」，随后用行情 JSON 对媒体判断做交叉验证，再写「核心观察」。
 
@@ -91,7 +92,7 @@
 - **市场综述**：分点列表，每主题用 `**子标题：**` + bullet points 卡片
 - **新闻格式**：`**标题**` → 摘要 → 空行 → `[来源](url) | MM-DD`（**独占一行**）
 - **新闻分隔**：来源行用 `<div class="news-source">` 包裹 + 虚线 `border-bottom`
-- **来源标签兼容**：富途/Bloomberg/Reuters/WSJ/FT/CNBC/The Economist/SCMP
+- **来源标签兼容**：富途/Bloomberg/Reuters/WSJ/FT/NYT/Washington Post/CNBC/The Economist/SCMP
 
 ## 邮件发送
 
@@ -116,7 +117,7 @@
 | brief-us-preopen | 6AM 周一-周五 | ET 9AM | 亚盘收盘 → 美盘前瞻 |
 | brief-us-close | 1:30PM 周一-周五 | ET 4:30PM | 美股全天 → 次日亚盘展望 |
 
-**当前状态：V10.1 已生产。仓库 `routines/` 与 `~/.claude/scheduled-tasks/brief-*/SKILL.md` 四份运行时 prompt 已同步；原有 4 个本地 schedule 为 ACTIVE。生产任务无 `--test`，发送给团队 13 人。**
+**当前状态：V10.2 已提交。仓库 `routines/` 与 `~/.claude/scheduled-tasks/brief-*/SKILL.md` 四份运行时 prompt 已同步；4 个本地 schedule 当前为暂停（`enabled=false`），恢复前先确认 Futu OpenD 在 `127.0.0.1:11111` 监听。生产任务无 `--test`，发送给团队 13 人。**
 
 ## 时间戳实现（V8.2 修复后）
 
@@ -152,12 +153,12 @@ Routine 模板里时点显示 `[JSON.timestamp_bj] / [JSON.timestamp_pt]`。
 - News/Community API：无需 OpenD，纯 HTTP 调用
 - OpenD: `/Applications/Futu_OpenD.app` → `127.0.0.1:11111`
 
-## V10.1 运行与回滚
+## V10.2 运行与回滚
 
 1. 生产发送必须同时传 `--news-ids-file` 与 `--external-urls-file`；测试发送不传，避免污染历史。
 2. Chrome 不可用不是发送阻断条件；RSS 摘要充分则继续使用，否则退回 Futu 兜底。
 3. 如果订阅外媒质量或稳定性异常，可把 routine 的步骤 3 回退为 RSS/Futu 兜底模式，行情与邮件链路不受影响。
-4. 仓库通过 git 记录 V10.1；回滚使用 `git revert`，不要删除历史 cache 以制造重复新闻。
+4. 仓库通过 git 记录 V10.2；回滚使用 `git revert`，不要删除历史 cache 以制造重复新闻。
 
 ## 已知问题与未来 Phase 2
 

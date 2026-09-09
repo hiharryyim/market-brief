@@ -30,14 +30,14 @@ broker API, market, or delivery channel.
 | News / 新闻 | Futu News API `news_type=1` | Multi-query recall per section |
 | Research / 研报 | Futu News API `news_type=3` | Analyst ratings; watchlist + Mag7/AI/semis + US hotspots; US+HK only |
 | Community / 社区 | Futu Community API | Wider keyword pool; recent posts; titles = retail voices |
-| Foreign media / 外媒 | Publisher RSS + logged-in Chrome (Bloomberg, FT, WSJ) | RSS baseline; selected original article text; RSS/Futu fallback |
+| Foreign media / 外媒 | Publisher RSS + logged-in Chrome (Bloomberg, FT, WSJ, NYT, Washington Post) | RSS baseline; selected original article text; RSS/Futu fallback |
 | Candidate discovery / 候选发现 | Publisher homepages / Agent Reach Exa | Discovery only; no subscriber cookies |
 | Config / 配置 | `config/email.conf`, `config/recipients.txt` | Gmail SMTP + recipients (gitignored) |
 
 **Requires / 依赖:** Futu OpenD running on `127.0.0.1:11111` with HK/US quote
 permission; `futu-api` + `yfinance`; a Gmail App Password. Publisher RSS works
 without browser credentials. Subscription-media deep reads additionally require
-Chrome running with the browser extension connected and Bloomberg / FT / WSJ logged
+Chrome running with the browser extension connected and the publisher accounts logged
 in; otherwise the brief degrades to RSS/Futu fallback.
 
 ## Processing / 处理
@@ -48,10 +48,11 @@ multi-stage news filtering (recall → dedupe → recency → similarity → wei
 a market-wide hotspot scan, an expanded analyst-research channel, and wider
 community sentiment.
 
-During writing, V10.1 first uses public publisher RSS summaries, then upgrades only
+During writing, V10.2 first uses public publisher RSS summaries, then upgrades only
 selected high-value stories to verified subscription journalism in international,
 macro, AI, and stock/industry sections while retaining at least one Futu item in
-each. The normal target is 5-7 external items; same-event stories are merged.
+each. The normal target is 7-10 external items; same-event stories are merged into
+one entry with all sources listed on the source line.
 External URLs are canonicalized and stored for seven-day cross-routine dedupe.
 
 ## Output / 输出
@@ -70,7 +71,7 @@ External URLs are canonicalized and stored for seven-day cross-routine dedupe.
 python3 scripts/fetch_data.py > /tmp/market_data.json
 
 # 2. (agent step) read the JSON; use RSS summaries for baseline facts; read
-#    selected Bloomberg / FT / WSJ originals through logged-in Chrome only when
+#    selected publisher originals through logged-in Chrome only when
 #    deeper context is needed; fall back to RSS/Futu on any browser/source
 #    failure; write /tmp/market_brief.md and /tmp/used_external_urls.json.
 
@@ -95,7 +96,7 @@ prompts are in [`../routines/`](../routines/) — they differ only in session fo
 - **Design for partial failure.** Batch-atomic APIs degrade to per-item. /
   为部分失败设计降级。
 - **Dedupe across the day.** A rolling 7-day `news_id` cache stops the same story
-  appearing in all four briefs; V10 applies the same rule to canonical external
+  appearing in all four briefs; V10+ applies the same rule to canonical external
   article URLs. / Futu news_id 与外媒 URL 都做 7 天滚动去重。
 - **Browser access is an enhancement, not a dependency.** Subscription originals
   improve context, but Chrome or publisher failure always falls back to RSS/Futu. /

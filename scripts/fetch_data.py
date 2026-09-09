@@ -13,6 +13,7 @@ import os
 import time
 import html
 import re
+import socket
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -31,10 +32,29 @@ EXTERNAL_NEWS_HISTORY_PATH = os.path.expanduser(
 # subscriber sessions. Chrome is reserved for selected articles that need
 # full-text context during the writing stage.
 EXTERNAL_RSS_FEEDS = {
-    'Bloomberg': 'https://feeds.bloomberg.com/markets/news.rss',
-    'WSJ': 'https://feeds.a.dj.com/rss/RSSMarketsMain.xml',
-    'FT': 'https://www.ft.com/companies?format=rss',
+    'Bloomberg': ['https://feeds.bloomberg.com/markets/news.rss'],
+    'WSJ': ['https://feeds.content.dowjones.io/public/rss/RSSMarketsMain'],
+    'FT': ['https://www.ft.com/companies?format=rss'],
+    'NYT': [
+        'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
+        'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
+        'https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml',
+        'https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml',
+    ],
+    'Washington Post': [
+        'https://feeds.washingtonpost.com/rss/world?itid=lk_inline_manual_11',
+    ],
 }
+
+
+def _opend_available(host: str = '127.0.0.1', port: int = 11111,
+                     timeout: float = 1.0) -> bool:
+    """Fail fast when Futu OpenD is not listening."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 # 时效性窗口（小时）— 不同类别使用不同窗口
 TIME_WINDOWS = {
@@ -60,14 +80,13 @@ COMMUNITY_FALLBACK_KEYWORDS = [
     '谷歌', '亚马逊', 'Meta', '英特尔', '台积电',
 ]
 
-RESEARCH_THEME_QUERIES = [
-    '半导体 评级', 'AI 算力 评级', '科技股 评级', '芯片 目标价',
-    '美股 目标价', '新能源车 评级', '互联网 科技', 'Mag7 评级',
+RESEARCH_MAG7_QUERIES = [
+    '英伟达', '微软', '苹果', '亚马逊', '谷歌', 'Meta', '特斯拉',
 ]
 
-RESEARCH_FALLBACK_KEYWORDS = [
-    '英伟达', '微软', '苹果', '亚马逊', '谷歌', 'Meta', '特斯拉',
-    '美光', 'AMD', '英特尔', '博通', '台积电', '高通', 'Arm',
+RESEARCH_INDUSTRY_QUERIES = [
+    'AI 算力 评级', '半导体 评级', '芯片 目标价', '科技股 评级',
+    '新能源车 评级', '互联网 科技',
 ]
 
 _COMMUNITY_SIGNAL_WORDS = [
@@ -201,41 +220,69 @@ def _parse_external_rss(xml_data: bytes, source: str, history_urls=None,
     return out[:limit]
 
 
+def _merge_external_items(items: list, limit: int) -> list:
+    """Merge multiple feeds for one publisher, deduping by canonical URL."""
+    merged = {}
+    for item in items:
+        canonical_url = canonicalize_external_url(item.get('url', ''))
+        if not canonical_url:
+            continue
+        current = merged.get(canonical_url)
+        if current is None or item.get('ts', 0) > current.get('ts', 0):
+            merged[canonical_url] = item
+    out = list(merged.values())
+    out.sort(key=lambda item: item.get('ts', 0), reverse=True)
+    return out[:limit]
+
+
 def fetch_external_rss(history_urls=None, recency_hours: int = 168,
                        per_source: int = 15) -> dict:
-    """Fetch public Bloomberg/WSJ/FT RSS candidates for the writer."""
+    """Fetch public publisher RSS candidates for the writer."""
     history_urls = history_urls or set()
     result = {'_errors': []}
     headers = {
-        'User-Agent': 'MarketDashboard/10.0 RSS Reader',
+        'User-Agent': 'MarketDashboard/10.1 RSS Reader',
         'Accept': 'application/rss+xml, application/xml, text/xml, */*',
     }
-    for source, url in EXTERNAL_RSS_FEEDS.items():
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as response:
-                xml_data = response.read()
-            recent_items = _parse_external_rss(
-                xml_data,
-                source,
-                history_urls=set(),
-                recency_hours=recency_hours,
-                limit=per_source,
-            )
-            result[source] = _parse_external_rss(
-                xml_data,
-                source,
-                history_urls=history_urls,
-                recency_hours=recency_hours,
-                limit=per_source,
-            )
-            if not recent_items:
-                result['_errors'].append(
-                    f'{source}: no RSS items within {recency_hours}h'
+    for source, urls in EXTERNAL_RSS_FEEDS.items():
+        if isinstance(urls, str):
+            feed_urls = [urls]
+        else:
+            feed_urls = list(urls or [])
+
+        all_items = []
+        recent_items = []
+        for url in feed_urls:
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    xml_data = response.read()
+                recent_items.extend(
+                    _parse_external_rss(
+                        xml_data,
+                        source,
+                        history_urls=set(),
+                        recency_hours=recency_hours,
+                        limit=per_source,
+                    )
                 )
-        except Exception as exc:
-            result[source] = []
-            result['_errors'].append(f'{source}: {exc}')
+                all_items.extend(
+                    _parse_external_rss(
+                        xml_data,
+                        source,
+                        history_urls=history_urls,
+                        recency_hours=recency_hours,
+                        limit=per_source,
+                    )
+                )
+            except Exception as exc:
+                result['_errors'].append(f'{source}: {url}: {exc}')
+
+        result[source] = _merge_external_items(all_items, per_source)
+        if feed_urls and not _merge_external_items(recent_items, per_source):
+            result['_errors'].append(
+                f'{source}: no RSS items within {recency_hours}h'
+            )
     return result
 
 
@@ -252,6 +299,8 @@ def fetch_futu_quotes():
 
     results = {}
     watchlist_codes = []
+    if not _opend_available():
+        return {'_opend_error': 'Futu OpenD not listening on 127.0.0.1:11111'}
     try:
         from futu import OpenQuoteContext
         ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
@@ -549,6 +598,9 @@ def fetch_hotspots():
     import logging
     logging.disable(logging.CRITICAL)
     try:
+        if not _opend_available():
+            result['_errors'].append('futu_owner_plate: OpenD not listening on 127.0.0.1:11111')
+            return result
         from futu import OpenQuoteContext, RET_OK
         from collections import defaultdict
         ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
@@ -703,7 +755,7 @@ def collect_hotspot_keywords(hotspots: dict, limit=8) -> list:
 
 
 def build_research_queries(stock_names=None, hotspots=None, limit=24) -> list:
-    """Build a broad but bounded research-report keyword universe."""
+    """Build research queries by priority: watchlist, Mag7, industries, hotspots."""
     out = []
     seen = set()
 
@@ -719,10 +771,10 @@ def build_research_queries(stock_names=None, hotspots=None, limit=24) -> list:
             if len(out) >= limit or added >= cap:
                 break
 
-    add_group(RESEARCH_THEME_QUERIES, 6)
-    add_group(list(stock_names or []), 5)
-    add_group(collect_hotspot_keywords(hotspots, limit=8), 5)
-    add_group(RESEARCH_FALLBACK_KEYWORDS, limit)
+    add_group(list(stock_names or []), 10)
+    add_group(RESEARCH_MAG7_QUERIES, 7)
+    add_group(RESEARCH_INDUSTRY_QUERIES, 5)
+    add_group(collect_hotspot_keywords(hotspots, limit=8), limit)
     return out
 
 
@@ -763,7 +815,7 @@ def supplement_research_from_news(research_data, news_data, min_items=RESEARCH_M
     """研报不足 min_items 时，从已召回的新闻板块里把「机构评级/目标价」类条目提升到研报。
 
     被提升的条目会**从原新闻板块移除**，避免同一条在新闻和研报里各出现一次。
-    候选板块：个股 / AI动态 / 科技消费 / 宏观大宗（最可能混入评级类新闻）。
+    候选板块优先级：个股（自选股）→ AI/科技消费 → 宏观大宗。
     """
     if len(research_data) >= min_items:
         return research_data
@@ -771,11 +823,11 @@ def supplement_research_from_news(research_data, news_data, min_items=RESEARCH_M
     if history_ids is None:
         history_ids = set()
     a_share_re = re.compile(r'[（(]\d{6}[)）]')
-    seen_titles = [r['title'] for r in research_data]
+    seen_titles = [r.get('title', '') for r in research_data]
     seen_ids = {r.get('news_id') for r in research_data}
 
-    cand_sections = [k for k in news_data
-                     if k.startswith('个股_') or k in ('AI动态', '科技消费', '宏观大宗')]
+    cand_sections = [k for k in news_data if k.startswith('个股_')]
+    cand_sections += [k for k in ('AI动态', '科技消费', '宏观大宗') if k in news_data]
     promoted = []
     for sec in cand_sections:
         kept = []
@@ -799,15 +851,76 @@ def supplement_research_from_news(research_data, news_data, min_items=RESEARCH_M
                 kept.append(it)
         news_data[sec] = kept
 
-    merged = research_data + promoted
-    merged.sort(key=lambda x: x.get('ts', 0), reverse=True)
-    return merged
+    return research_data + promoted
+
+
+RESEARCH_PER_SUBJECT_CAP = 2  # 同一公司/题材最多几条研报，避免单只票刷满整栏
+
+
+def _research_subject_keys(item, queries) -> set:
+    """一条研报归属的主题键：召回它的查询 + 标题里命中的其他查询名。
+
+    跨查询泄漏很常见（"科技股 评级" 也会捞到微软），所以标题命中的名字
+    同样计入限额，否则同一家公司还是能换个查询绕过去。
+    """
+    keys = {item.get('_query', '')}
+    title = item.get('title', '')
+    keys.update(q for q in (queries or []) if q and q in title)
+    return {k for k in keys if k}
+
+
+def select_research_items(candidates, queries, limit,
+                         per_subject_cap=RESEARCH_PER_SUBJECT_CAP) -> list:
+    """按查询优先级轮转选条，并限制同一主题最多 per_subject_cap 条。
+
+    只按 (query_rank, -ts) 排序会让靠前的关键词一口气占满整栏——实测出现过
+    5 条研报里 4 条微软。这里改为按优先级分组后一轮一轮取每组最新的一条，
+    同一主题取满限额后让位给后面的公司。
+    """
+    ranks = sorted({c.get('_query_rank', 9999) for c in candidates})
+    grouped = {}
+    for rank in ranks:
+        grouped[rank] = sorted(
+            [c for c in candidates if c.get('_query_rank', 9999) == rank],
+            key=lambda x: x['ts'], reverse=True,
+        )
+
+    subject_counts = {}
+    selected = []
+    max_depth = max((len(g) for g in grouped.values()), default=0)
+    for depth in range(max_depth):
+        if len(selected) >= limit:
+            break
+        for rank in ranks:
+            if len(selected) >= limit:
+                break
+            group = grouped[rank]
+            if depth >= len(group):
+                continue
+            item = group[depth]
+            keys = _research_subject_keys(item, queries)
+            if any(subject_counts.get(k, 0) >= per_subject_cap for k in keys):
+                continue
+            for k in keys:
+                subject_counts[k] = subject_counts.get(k, 0) + 1
+            selected.append(item)
+
+    # 轮转只用于"选哪几条"；最终展示顺序仍按优先级+时间，
+    # 免得同一家公司的两条研报被别的公司隔开。
+    selected.sort(key=lambda x: (x.get('_query_rank', 9999), -x['ts']))
+    for item in selected:
+        item.pop('_query_rank', None)
+        item.pop('_query', None)
+    return selected
 
 
 def fetch_research(history_ids=None, recency_hours=72, limit=5, queries=None):
     """机构研报/评级（Futu news_type=3）。仅保留美股+港股，剔除 A股（标题含 6 位代码）。
 
-    多题材召回 → 历史去重 → 近 72h → 剔除 A股 → 主题相似度去重 → 按时间取 N 条。
+    多题材召回 → 历史去重 → 近 72h → 剔除 A股 → 主题相似度去重
+    → 按查询优先级轮转取 N 条，同一公司最多 RESEARCH_PER_SUBJECT_CAP 条。
+    查询顺序由 build_research_queries() 控制：
+    自选股 → Mag7 → 相关行业 → 市场热点股兜底。
     """
     import re
     if history_ids is None:
@@ -817,18 +930,20 @@ def fetch_research(history_ids=None, recency_hours=72, limit=5, queries=None):
     a_share_re = re.compile(r'[（(]\d{6}[)）]')  # A股 6 位代码，如 (603713)/（002025）
 
     pool = {}
-    for q in queries or build_research_queries():
+    query_list = list(queries or build_research_queries())
+    for query_rank, q in enumerate(query_list):
         items = _fetch_raw_news(q, size=10, news_type=3)
         if items and isinstance(items[0], dict) and '_error' in items[0]:
             continue
         for it in items:
             nid = it.get('news_id', '')
-            if nid and nid not in pool:
-                pool[nid] = it
+            if nid and (nid not in pool or query_rank < pool[nid]['query_rank']):
+                pool[nid] = {'item': it, 'query_rank': query_rank, 'query': q}
 
     seen_titles = []
     out = []
-    for nid, item in pool.items():
+    for nid, record in pool.items():
+        item = record['item']
         if nid in history_ids:
             continue
         try:
@@ -846,11 +961,12 @@ def fetch_research(history_ids=None, recency_hours=72, limit=5, queries=None):
             continue
         url = item.get('url', '') or f"https://news.futunn.com/post/{nid.replace('post:', '')}"
         out.append({'title': title, 'date': datetime.fromtimestamp(ts).strftime('%m-%d'),
-                    'url': url, 'news_id': nid, 'ts': ts})
+                    'url': url, 'news_id': nid, 'ts': ts,
+                    '_query_rank': record['query_rank'],
+                    '_query': record['query']})
         seen_titles.append(title)
 
-    out.sort(key=lambda x: x['ts'], reverse=True)
-    return out[:limit]
+    return select_research_items(out, query_list, limit)
 
 
 def get_watchlist_names():
@@ -858,6 +974,8 @@ def get_watchlist_names():
     import logging
     logging.disable(logging.CRITICAL)
     names = []
+    if not _opend_available():
+        return names
     try:
         from futu import OpenQuoteContext
         ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
